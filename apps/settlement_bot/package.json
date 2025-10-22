@@ -1,0 +1,25 @@
+{
+  "name": "@shadowswap/settlement-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Off-chain settlement bot for ShadowSwap",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "watch": "ts-node-dev --respawn src/index.ts"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.87.6",
+    "@coral-xyz/anchor": "^0.31.1",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.1",
+    "ts-node-dev": "^2.0.0"
+  }
+}
+

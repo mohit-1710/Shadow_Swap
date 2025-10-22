@@ -1,0 +1,23 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+
+# Keypairs
+*.json
+!package.json
+!tsconfig.json
+
+# Logs
+logs/
+*.log
+
+# IDE
+.vscode/
+.idea/
+

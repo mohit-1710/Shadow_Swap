@@ -1,0 +1,38 @@
+{
+  "name": "shadowswap-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ShadowSwap - Privacy-Preserving DEX on Solana",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:frontend": "yarn workspace @shadowswap/frontend dev",
+    "dev:bot": "yarn workspace @shadowswap/settlement-bot dev",
+    "build:frontend": "yarn workspace @shadowswap/frontend build",
+    "build:bot": "yarn workspace @shadowswap/settlement-bot build",
+    "build:shared": "yarn workspace @shadowswap/shared-types build",
+    "build:all": "yarn build:shared && yarn build:frontend && yarn build:bot",
+    "anchor:build": "cd apps/anchor_program && anchor build",
+    "anchor:test": "cd apps/anchor_program && anchor test",
+    "anchor:deploy": "cd apps/anchor_program && anchor deploy",
+    "test": "yarn anchor:test",
+    "clean": "rm -rf node_modules apps/*/node_modules packages/*/node_modules apps/*/dist packages/*/dist apps/anchor_program/target"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "yarn": ">=1.22.0"
+  },
+  "packageManager": "yarn@1.22.22",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/shadowswap"
+  },
+  "author": "",
+  "license": "MIT"
+}
+

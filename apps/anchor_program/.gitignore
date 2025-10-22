@@ -1,0 +1,40 @@
+# Anchor
+.anchor
+target/
+test-ledger/
+
+# IDL
+idl/
+
+# Keys
+*.key
+*.json.bak
+wallet/
+
+# Logs
+*.log
+program-logs/
+
+# Dependencies
+node_modules/
+yarn.lock
+package-lock.json
+
+# TypeScript
+*.tsbuildinfo
+
+# Build outputs
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
