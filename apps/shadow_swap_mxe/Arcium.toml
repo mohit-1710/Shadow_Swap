@@ -1,0 +1,39 @@
+[toolchain]
+
+[features]
+seeds = false
+skip-lint = false
+resolution = "512x512"
+
+[programs.localnet]
+shadow_swap = "Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+
+[programs.devnet]
+shadow_swap = "Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+
+[registry]
+url = "https://api.devnet.solana.com"
+
+[provider]
+cluster = "Devnet"
+wallet = "~/.config/solana/id.json"
+
+[scripts]
+test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 5000
+shutdown_wait = 2000
+upgradeable = false
+
+[[test.validator.account]]
+address = "7W5V6LiW9rYjz85QCf6qeFiHm8hhZjKpQRrfXiDQXr57"
+filename = "tests/fixtures/arcium_cluster.json"
+
+[[test.validator.account]]
+address = "9vphTNnxoJkZ1mNdYFZqwg1U5Y9igFP5ijzWFXfBpLRz"
+filename = "tests/fixtures/mempool.json"
+
+[[test.validator.clone]]
+address = "APLjbMvhWu6xmhqePRXfMVTmF3iLuJvCiREr2RQq2RM"
+
