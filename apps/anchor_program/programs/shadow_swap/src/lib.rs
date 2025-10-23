@@ -214,6 +214,124 @@ pub mod shadow_swap {
         Ok(())
     }
 
+    /// Match callback - Called by Arcium MPC after order matching
+    /// 
+    /// This function is called by the Arcium MPC network with the results
+    /// of the privacy-preserving matching algorithm. It processes each match
+    /// and updates order statuses accordingly.
+    /// 
+    /// NOTE: The #[arcium_callback] macro is a placeholder for the actual
+    /// Arcium integration. In production, this would be:
+    /// #[arcium_callback(mpc_program = "YOUR_MPC_PROGRAM_ID")]
+    pub fn match_callback(
+        ctx: Context<MatchCallback>,
+        results: Vec<MatchResult>,
+    ) -> Result<()> {
+        let callback_auth = &ctx.accounts.callback_auth;
+        let clock = Clock::get()?;
+        
+        // Verify callback authorization
+        require!(
+            callback_auth.is_active,
+            ShadowSwapError::UnauthorizedCallback
+        );
+        require!(
+            callback_auth.expires_at > clock.unix_timestamp,
+            ShadowSwapError::CallbackAuthExpired
+        );
+        
+        msg!("Processing {} match results", results.len());
+        
+        // Process each match result
+        for (idx, match_result) in results.iter().enumerate() {
+            msg!(
+                "Match {}: buyer={}, seller={}, buyer_order={}, seller_order={}",
+                idx,
+                match_result.buyer_pubkey,
+                match_result.seller_pubkey,
+                match_result.buyer_order_id,
+                match_result.seller_order_id
+            );
+            
+            // Load buyer's order
+            let order_book_key = ctx.accounts.order_book.key();
+            let buyer_order_id_bytes = match_result.buyer_order_id.to_le_bytes();
+            let buyer_order_seeds = [
+                b"order".as_ref(),
+                order_book_key.as_ref(),
+                &buyer_order_id_bytes,
+            ];
+            let (buyer_order_pda, _) = Pubkey::find_program_address(
+                &buyer_order_seeds,
+                ctx.program_id
+            );
+            
+            // Load seller's order
+            let seller_order_id_bytes = match_result.seller_order_id.to_le_bytes();
+            let seller_order_seeds = [
+                b"order".as_ref(),
+                order_book_key.as_ref(),
+                &seller_order_id_bytes,
+            ];
+            let (seller_order_pda, _) = Pubkey::find_program_address(
+                &seller_order_seeds,
+                ctx.program_id
+            );
+            
+            // Verify buyer order account matches expected PDA
+            require!(
+                buyer_order_pda == match_result.buyer_pubkey,
+                ShadowSwapError::InvalidOrderBook
+            );
+            
+            // Verify seller order account matches expected PDA
+            require!(
+                seller_order_pda == match_result.seller_pubkey,
+                ShadowSwapError::InvalidOrderBook
+            );
+            
+            // NOTE: In production, you would load these accounts using remaining_accounts
+            // and verify their status. For the MVP, we're documenting the intended logic:
+            //
+            // let buyer_order = &mut ctx.remaining_accounts[buyer_idx];
+            // let seller_order = &mut ctx.remaining_accounts[seller_idx];
+            //
+            // Verify both orders are active
+            // require!(
+            //     buyer_order.status == ORDER_STATUS_ACTIVE,
+            //     ShadowSwapError::OrderNotActive
+            // );
+            // require!(
+            //     seller_order.status == ORDER_STATUS_ACTIVE,
+            //     ShadowSwapError::OrderNotActive
+            // );
+            //
+            // Update order statuses to "Matched_Pending_Exec" (status = 5)
+            // buyer_order.status = ORDER_STATUS_MATCHED_PENDING;
+            // buyer_order.encrypted_remaining = match_result.encrypted_remaining.clone();
+            // buyer_order.updated_at = clock.unix_timestamp;
+            //
+            // seller_order.status = ORDER_STATUS_MATCHED_PENDING;
+            // seller_order.encrypted_remaining = match_result.encrypted_remaining.clone();
+            // seller_order.updated_at = clock.unix_timestamp;
+            
+            // Emit match queued event
+            emit!(MatchQueued {
+                order_book: ctx.accounts.order_book.key(),
+                buyer: match_result.buyer_pubkey,
+                seller: match_result.seller_pubkey,
+                buyer_order_id: match_result.buyer_order_id,
+                seller_order_id: match_result.seller_order_id,
+                encrypted_amount: match_result.encrypted_amount.clone(),
+                encrypted_price: match_result.encrypted_price.clone(),
+                timestamp: clock.unix_timestamp,
+            });
+        }
+        
+        msg!("Match callback processed {} matches", results.len());
+        Ok(())
+    }
+
     /// Create callback authorization for keeper
     pub fn create_callback_auth(
         ctx: Context<CreateCallbackAuth>,
@@ -402,6 +520,49 @@ pub struct CallbackAuth {
 }
 
 // ============================================================================
+// Match Result Structures
+// ============================================================================
+
+/// Result of matching two orders from Arcium MPC
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
+pub struct MatchResult {
+    /// Buyer's order account pubkey
+    pub buyer_pubkey: Pubkey,
+    
+    /// Seller's order account pubkey
+    pub seller_pubkey: Pubkey,
+    
+    /// Buyer's order ID
+    pub buyer_order_id: u64,
+    
+    /// Seller's order ID
+    pub seller_order_id: u64,
+    
+    /// Matched amount (encrypted)
+    pub encrypted_amount: Vec<u8>,
+    
+    /// Execution price (encrypted)
+    pub encrypted_price: Vec<u8>,
+}
+
+// ============================================================================
+// Events
+// ============================================================================
+
+/// Event emitted when orders are matched and queued for execution
+#[event]
+pub struct MatchQueued {
+    pub order_book: Pubkey,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub buyer_order_id: u64,
+    pub seller_order_id: u64,
+    pub encrypted_amount: Vec<u8>,
+    pub encrypted_price: Vec<u8>,
+    pub timestamp: i64,
+}
+
+// ============================================================================
 // Error Codes
 // ============================================================================
 
@@ -451,6 +612,9 @@ pub enum ShadowSwapError {
     
     #[msg("Numerical overflow")]
     NumericalOverflow,
+    
+    #[msg("Order is not active")]
+    OrderNotActive,
 }
 
 // ============================================================================
@@ -477,6 +641,9 @@ pub const ORDER_STATUS_FILLED: u8 = 3;
 
 /// Order status: Cancelled
 pub const ORDER_STATUS_CANCELLED: u8 = 4;
+
+/// Order status: Matched, pending execution
+pub const ORDER_STATUS_MATCHED_PENDING: u8 = 5;
 
 /// Seeds for PDA derivation
 pub const ORDER_BOOK_SEED: &[u8] = b"order_book";
@@ -617,6 +784,24 @@ pub struct MatchOrders<'info> {
     pub sell_order: Account<'info, EncryptedOrder>,
     
     pub keeper: Signer<'info>,
+}
+
+#[derive(Accounts)]
+pub struct MatchCallback<'info> {
+    #[account(
+        constraint = callback_auth.is_active @ ShadowSwapError::UnauthorizedCallback,
+        constraint = callback_auth.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook,
+        seeds = [CALLBACK_AUTH_SEED, order_book.key().as_ref(), keeper.key().as_ref()],
+        bump = callback_auth.bump
+    )]
+    pub callback_auth: Account<'info, CallbackAuth>,
+    
+    pub order_book: Account<'info, OrderBook>,
+    
+    pub keeper: Signer<'info>,
+    
+    // NOTE: In production, matched order accounts would be passed via remaining_accounts
+    // This allows for dynamic number of matches in a single callback
 }
 
 #[derive(Accounts)]

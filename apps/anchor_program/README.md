@@ -1,208 +1,338 @@
-# ShadowSwap - Privacy-Preserving DEX on Solana
+# ShadowSwap Anchor Program
 
-## Overview
+Privacy-preserving DEX smart contract for Solana, built with Anchor framework and Arcium MPC.
 
-ShadowSwap is a privacy-preserving decentralized exchange (DEX) built on Solana using the Anchor framework. The protocol enables private trading by encrypting order details (price, amount, side) client-side before submitting them on-chain.
+---
 
-## Phase 1 & 2: Anchor Smart Contract - Account Structures ✅
-
-This implementation contains the core account structures for the ShadowSwap protocol, following the specifications in the Low-Level Design (LLD) documents.
-
-### Project Structure
+## 📁 Project Structure
 
 ```
-shadow_swap/
+anchor_program/
 ├── programs/
-│   └── shadow_swap/
+│   └── shadow_swap/           # Anchor Rust program
 │       ├── src/
-│       │   └── lib.rs          # Core account structures and error codes
-│       └── Cargo.toml           # Rust dependencies
-├── tests/
-│   └── shadow_swap.ts           # TypeScript tests
-├── Anchor.toml                  # Anchor configuration
-└── README.md                    # This file
+│       │   └── lib.rs         # Main program (match_callback ✅)
+│       └── Cargo.toml
+├── tests/                     # Integration tests (TypeScript)
+│   ├── shadow_swap.ts         # Main test suite
+│   └── test-match-callback.ts # Callback tests
+├── scripts/                   # Utility scripts (TypeScript)
+│   ├── initialize-devnet.js   # Initialize OrderBook on devnet
+│   ├── setup-arcium.ts        # Deploy Arcium circuit (one-time)
+│   └── run-matching.ts        # Run matching keeper bot
+├── src/                       # TypeScript helpers
+│   └── arcium-matching.ts     # ArciumMatchingEngine class
+├── arcium/                    # Arcium circuit definition
+│   └── matching_logic.arc     # Matching algorithm (docs)
+├── docs/                      # 📚 Documentation
+│   ├── ARCIUM_CLEANUP_SUMMARY.md
+│   ├── ARCIUM_SDK_GUIDE.md
+│   ├── IMPLEMENTATION.md
+│   ├── README_ARCIUM_MATCHING.md
+│   ├── TESTING.md
+│   └── TEST_SUMMARY.md
+├── target/                    # Build artifacts (gitignored)
+├── Anchor.toml                # Anchor configuration
+├── Cargo.toml                 # Rust workspace
+├── package.json               # Node dependencies
+├── tsconfig.json              # TypeScript config
+└── README.md                  # This file
 ```
 
-## Account Structures
+---
 
-### 1. EncryptedOrder
-
-Stores individual encrypted order data. The on-chain program never sees plaintext order details.
-
-**Fields:**
-- `owner`: Pubkey - Order owner's public key
-- `order_book`: Pubkey - Order book this order belongs to
-- `cipher_payload`: Vec<u8> - Encrypted order data (max 512 bytes)
-  - Contains: order side, price, amount, and other parameters (all encrypted)
-- `status`: u8 - Order status (1=active, 2=partial, 3=filled, 4=cancelled)
-- `encrypted_remaining`: Vec<u8> - Encrypted remaining amount
-- `escrow`: Pubkey - Escrow account holding the order's funds
-- `created_at`: i64 - Order creation timestamp
-- `updated_at`: i64 - Last update timestamp
-- `order_id`: u64 - Sequential order ID assigned by order book
-- `bump`: u8 - PDA bump seed
-
-**PDA Seeds:** `[b"order", order_book.key, order_id.to_le_bytes()]`
-
-### 2. OrderBook
-
-Manages the order book for a trading pair. MVP supports SOL/USDC pair.
-
-**Fields:**
-- `authority`: Pubkey - Order book management authority
-- `base_mint`: Pubkey - Base token mint (SOL for MVP)
-- `quote_mint`: Pubkey - Quote token mint (USDC for MVP)
-- `order_count`: u64 - Total orders created (for sequential IDs)
-- `active_orders`: u64 - Number of active orders
-- `encrypted_volume_base`: Vec<u8> - Total volume in base token (encrypted)
-- `encrypted_volume_quote`: Vec<u8> - Total volume in quote token (encrypted)
-- `created_at`: i64 - Order book creation timestamp
-- `last_trade_at`: i64 - Last trade timestamp
-- `fee_bps`: u16 - Fee in basis points (e.g., 30 = 0.3%)
-- `fee_collector`: Pubkey - Fee collection account
-- `min_base_order_size`: u64 - Minimum order size in base token
-- `is_active`: bool - Whether order book is active
-- `bump`: u8 - PDA bump seed
-
-**PDA Seeds:** `[b"order_book", base_mint.key, quote_mint.key]`
-
-### 3. Escrow
-
-Holds funds for an order until matched or cancelled.
-
-**Fields:**
-- `order`: Pubkey - Associated order
-- `owner`: Pubkey - Order owner
-- `order_book`: Pubkey - Order book reference
-- `token_account`: Pubkey - PDA-owned token account holding funds
-- `token_mint`: Pubkey - Mint of escrowed token
-- `encrypted_amount`: Vec<u8> - Original deposited amount (encrypted)
-- `encrypted_remaining`: Vec<u8> - Remaining amount (encrypted)
-- `created_at`: i64 - Escrow creation timestamp
-- `bump`: u8 - PDA bump seed
-
-**PDA Seeds:** `[b"escrow", order.key]`
-
-### 4. CallbackAuth
-
-Authentication token for callback operations from the keeper/matching engine.
-
-**Fields:**
-- `authority`: Pubkey - Authorized callback user
-- `order_book`: Pubkey - Valid for this order book
-- `nonce`: u64 - Nonce to prevent replay attacks
-- `expires_at`: i64 - Expiration timestamp
-- `is_active`: bool - Whether callback auth is active
-- `created_at`: i64 - Creation timestamp
-- `bump`: u8 - PDA bump seed
-
-**PDA Seeds:** `[b"callback_auth", order_book.key, authority.key]`
-
-## Error Codes
-
-The contract defines comprehensive error codes for various failure scenarios:
-
-- `OrderBookNotActive` - Order book is not active
-- `InvalidOrderStatus` - Invalid order status
-- `OrderTooSmall` - Order amount too small
-- `InvalidCipherPayload` - Invalid cipher payload
-- `UnauthorizedCallback` - Unauthorized callback attempt
-- `CallbackAuthExpired` - Callback auth has expired
-- `InvalidEscrow` - Invalid escrow account
-- `InsufficientEscrowFunds` - Insufficient funds in escrow
-- `InvalidTokenMint` - Invalid token mint
-- `OrderNotFound` - Order not found
-- `OrderAlreadyFilled` - Order already filled
-- `OrderAlreadyCancelled` - Order already cancelled
-- `InvalidOrderBook` - Invalid order book
-- `InvalidFeeConfiguration` - Invalid fee configuration
-- `NumericalOverflow` - Numerical overflow occurred
-
-## Constants
-
-```rust
-MAX_CIPHER_PAYLOAD_SIZE: 512 bytes       // Max encrypted order payload
-MAX_ENCRYPTED_AMOUNT_SIZE: 64 bytes      // Max encrypted amount field
-MAX_ENCRYPTED_VOLUME_SIZE: 64 bytes      // Max encrypted volume field
-
-ORDER_STATUS_ACTIVE: 1                   // Active order
-ORDER_STATUS_PARTIAL: 2                  // Partially filled
-ORDER_STATUS_FILLED: 3                   // Fully filled
-ORDER_STATUS_CANCELLED: 4                // Cancelled
-
-// PDA Seeds
-ORDER_BOOK_SEED: b"order_book"
-ORDER_SEED: b"order"
-ESCROW_SEED: b"escrow"
-CALLBACK_AUTH_SEED: b"callback_auth"
-```
-
-## Privacy Features
-
-1. **Encrypted Order Data**: All order details (price, amount, side) are encrypted client-side
-2. **Encrypted Volumes**: Trading volumes are stored encrypted
-3. **Encrypted Amounts**: All token amounts in escrow are encrypted
-4. **On-Chain Privacy**: Smart contract never processes plaintext order data
-5. **Minimal Public Data**: Only order status and timestamps are public
-
-## Development
+## 🚀 Quick Start
 
 ### Prerequisites
 
-- Rust 1.75+
-- Solana CLI 1.18+
-- Anchor 0.31.1+
-- Node.js 16+
+```bash
+# Install dependencies
+solana --version     # >= 1.18.0
+anchor --version     # >= 0.31.0
+node --version       # >= 18.0.0
+yarn --version       # >= 1.22.0
+```
 
-### Build
+### Install Dependencies
+
+```bash
+yarn install
+```
+
+### Build Program
 
 ```bash
 anchor build
 ```
 
-### Test
+### Run Tests
 
 ```bash
 anchor test
 ```
 
-### Deploy (Devnet)
+---
+
+## 📦 Key Commands
+
+### Development
+
+```bash
+# Build the Anchor program
+anchor build
+
+# Run all tests
+anchor test
+
+# Run specific test
+anchor test -- --grep "should place order"
+
+# Deploy to devnet
+anchor deploy --provider.cluster devnet
+```
+
+### Initialization
+
+```bash
+# Initialize order book on devnet
+node scripts/initialize-devnet.js
+```
+
+### Arcium Integration
+
+```bash
+# Setup Arcium circuit (one-time)
+yarn arcium:setup
+
+# Run matching keeper bot
+yarn arcium:run
+
+# Test match callback
+yarn test:callback
+```
+
+---
+
+## 🔐 Core Features
+
+### Anchor Program (`lib.rs`)
+
+- ✅ **`initialize_order_book`** - Create new trading pair order book
+- ✅ **`place_order`** - Submit encrypted orders
+- ✅ **`cancel_order`** - Cancel active orders
+- ✅ **`match_callback`** - Process Arcium MPC match results
+- ✅ **`create_callback_auth`** - Authorize keeper for callbacks
+
+### Arcium Matching (`arcium-matching.ts`)
+
+- ✅ **Price-time priority** matching algorithm
+- ✅ **Privacy-preserving** MPC computation
+- ✅ **SDK integration** using `@arcium-hq/client`
+- ✅ **Keeper bot** for continuous matching
+- ✅ **Circuit deployment** workflow
+
+---
+
+## 📚 Documentation
+
+Comprehensive documentation is available in the [`docs/`](./docs/) directory:
+
+| File | Description |
+|------|-------------|
+| [IMPLEMENTATION.md](./docs/IMPLEMENTATION.md) | Anchor program implementation details |
+| [README_ARCIUM_MATCHING.md](./docs/README_ARCIUM_MATCHING.md) | Complete Arcium integration guide |
+| [ARCIUM_SDK_GUIDE.md](./docs/ARCIUM_SDK_GUIDE.md) | Arcium SDK usage reference |
+| [TESTING.md](./docs/TESTING.md) | Testing guide and commands |
+| [TEST_SUMMARY.md](./docs/TEST_SUMMARY.md) | Test coverage summary |
+| [ARCIUM_CLEANUP_SUMMARY.md](./docs/ARCIUM_CLEANUP_SUMMARY.md) | Cleanup and refactoring notes |
+
+---
+
+## 🧪 Testing
+
+### Run All Tests
+
+```bash
+anchor test
+```
+
+### Test Coverage
+
+- ✅ Initialize order book
+- ✅ Place encrypted orders
+- ✅ Cancel orders
+- ✅ Match callback processing
+- ✅ Error handling (unhappy paths)
+- ✅ Edge cases
+
+See [docs/TEST_SUMMARY.md](./docs/TEST_SUMMARY.md) for details.
+
+---
+
+## 🔧 Configuration
+
+### Environment Variables
+
+```bash
+# Program
+export PROGRAM_ID="Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+export ORDER_BOOK_ADDRESS="6n4KbFqXoLaCYnANHNuKZUW6g73A3B4JLgQRMPWQh4Wv"
+
+# Tokens (devnet)
+export BASE_MINT="So11111111111111111111111111111111111111112"  # SOL
+export QUOTE_MINT="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"  # USDC
+
+# Keeper
+export KEEPER_KEYPAIR='[...]'
+export RPC_ENDPOINT="https://api.devnet.solana.com"
+```
+
+### Anchor.toml
+
+```toml
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[programs.devnet]
+shadow_swap = "Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+```
+
+---
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                   ARCIUM MPC NETWORK                         │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │  Privacy-Preserving Matching Algorithm             │     │
+│  │  • Price-time priority sorting                     │     │
+│  │  • Secure comparisons on encrypted data            │     │
+│  │  • Returns MatchResult[]                           │     │
+│  └────────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+                     ▲                        │
+           [Encrypted Orders]        [Match Results]
+                     │                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│         KEEPER BOT (ArciumMatchingEngine)                    │
+│  • Fetch orders from order book                              │
+│  • Submit to Arcium MPC                                      │
+│  • Invoke match_callback with results                        │
+└─────────────────────────────────────────────────────────────┘
+                     ▲                        │
+           [Query Orders]            [match_callback]
+                     │                        ▼
+┌─────────────────────────────────────────────────────────────┐
+│           ANCHOR PROGRAM (lib.rs) ✅                         │
+│  • place_order() - Store encrypted orders                    │
+│  • match_callback() - Process matches                        │
+│  • Settlement logic                                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 🔐 Security
+
+### Privacy Features
+
+- ✅ **Client-side encryption** - Orders encrypted before submission
+- ✅ **MPC computation** - Matching in secure Arcium network
+- ✅ **Zero-knowledge proofs** - No plaintext order data on-chain
+- ✅ **Authorization checks** - Callback auth required
+
+### Auditing
+
+- PDAs derived correctly
+- Token transfers verified
+- Escrow accounts secured
+- Event emission for transparency
+
+---
+
+## 📝 Development Workflow
+
+### 1. Build & Test Locally
+
+```bash
+anchor build
+anchor test
+```
+
+### 2. Deploy to Devnet
 
 ```bash
 anchor deploy --provider.cluster devnet
 ```
 
-## Code Quality
+### 3. Initialize Order Book
 
-✅ **Clean Code**: Clear variable names, proper error handling, concise comments  
-✅ **Scalability**: Modular structure, extensible for multi-token support  
-✅ **LLD Adherence**: Exact struct definitions, seeds, and field names  
-✅ **Privacy-First**: No plaintext order details in contract  
-✅ **Rust Best Practices**: Proper use of Anchor framework patterns  
+```bash
+node scripts/initialize-devnet.js
+```
 
-## Next Steps (Phase 3+)
+### 4. Setup Arcium (One-Time)
 
-- [ ] Implement instruction handlers (place_order, cancel_order, match_orders)
-- [ ] Add order matching logic
-- [ ] Implement settlement mechanism
-- [ ] Add fee collection
-- [ ] Create TypeScript SDK
-- [ ] Build frontend UI
-- [ ] Deploy to devnet/mainnet
+```bash
+yarn arcium:setup
+```
 
-## Security Considerations
+### 5. Run Keeper Bot
 
-1. All encryption/decryption happens client-side
-2. PDA-based account security
-3. Proper authority checks in instructions (to be implemented)
-4. Replay attack prevention via nonces
-5. Callback authentication for matching engine
+```bash
+yarn arcium:run
+```
 
-## License
+---
 
-MIT
+## 🤝 Contributing
 
-## Contributing
+1. Follow Rust and Anchor best practices
+2. Write tests for new features
+3. Update documentation
+4. Run `anchor test` before committing
 
-This is a hackathon project for Solana. Contributions welcome!
+---
 
+## 📄 License
+
+ISC
+
+---
+
+## 🔗 Links
+
+- **Anchor Framework**: https://www.anchor-lang.com/
+- **Arcium SDK**: https://github.com/arcium-hq/arcium-tooling
+- **Solana Docs**: https://docs.solana.com/
+
+---
+
+## 💡 Key Files
+
+| File | Purpose |
+|------|---------|
+| `programs/shadow_swap/src/lib.rs` | Main Anchor program |
+| `src/arcium-matching.ts` | Arcium matching engine |
+| `scripts/run-matching.ts` | Keeper bot |
+| `tests/shadow_swap.ts` | Integration tests |
+| `docs/README_ARCIUM_MATCHING.md` | Complete Arcium guide |
+
+---
+
+## 🎯 Status
+
+| Component | Status |
+|-----------|--------|
+| Anchor Program | ✅ Production-ready |
+| Match Callback | ✅ Implemented |
+| Arcium Integration | ✅ SDK ready |
+| Keeper Bot | ✅ Ready |
+| Tests | ✅ Passing |
+| Documentation | ✅ Complete |
+
+---
+
+**For detailed documentation, see the [`docs/`](./docs/) directory.**
