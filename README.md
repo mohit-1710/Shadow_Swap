@@ -15,6 +15,17 @@ ShadowSwap_Project/
 └── Project_Details/          # Design documents
 ```
 
+## 📋 Current Phase
+
+**Phase 4: Frontend Integration & Mock End-to-End Testing**
+
+See [plan.md](./plan.md) for the complete roadmap for integrating the frontend and performing mock E2E testing.
+
+**Current Status:**
+- ✅ Phase 1-3: Backend complete (Anchor program + Keeper bot)
+- ✅ Deployed to Devnet
+- 🚧 Phase 4: Frontend integration (in progress)
+
 ## Quick Start
 
 ```bash

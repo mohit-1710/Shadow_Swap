@@ -1,7 +1,7 @@
 [package]
 name = "shadow_swap"
 version = "0.1.0"
-description = "Created with Anchor"
+description = "ShadowSwap - Privacy-preserving DEX on Solana"
 edition = "2021"
 
 [lib]
@@ -19,11 +19,10 @@ anchor-debug = []
 custom-heap = []
 custom-panic = []
 
-
 [dependencies]
 anchor-lang = "0.31.1"
 anchor-spl = "0.31.1"
 
-
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }
+

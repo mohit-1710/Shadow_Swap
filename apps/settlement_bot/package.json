@@ -2,24 +2,44 @@
   "name": "@shadowswap/settlement-bot",
   "version": "0.1.0",
   "private": true,
-  "description": "Off-chain settlement bot for ShadowSwap",
+  "description": "Off-chain keeper bot for ShadowSwap Hybrid architecture",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "watch": "ts-node-dev --respawn src/index.ts"
+    "watch": "ts-node-dev --respawn src/index.ts",
+    "test": "jest",
+    "lint": "eslint src/**/*.ts"
   },
   "dependencies": {
     "@solana/web3.js": "^1.87.6",
     "@coral-xyz/anchor": "^0.31.1",
-    "dotenv": "^16.3.1"
+    "@solana/spl-token": "^0.4.0",
+    "dotenv": "^16.3.1",
+    "bn.js": "^5.2.1"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "@types/bn.js": "^5.1.5",
     "typescript": "^5.0.0",
     "ts-node": "^10.9.1",
-    "ts-node-dev": "^2.0.0"
-  }
+    "ts-node-dev": "^2.0.0",
+    "jest": "^29.7.0",
+    "@types/jest": "^29.5.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0"
+  },
+  "keywords": [
+    "solana",
+    "shadowswap",
+    "dex",
+    "keeper",
+    "mev",
+    "arcium",
+    "sanctum"
+  ],
+  "author": "ShadowSwap Team",
+  "license": "MIT"
 }
-

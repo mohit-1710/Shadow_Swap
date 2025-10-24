@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-declare_id!("Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci");
+declare_id!("DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu");
 
 #[program]
 pub mod shadow_swap {
@@ -39,9 +39,13 @@ pub mod shadow_swap {
         Ok(())
     }
 
-    /// Place a new encrypted order
-    pub fn place_order(
-        ctx: Context<PlaceOrder>,
+    /// Submit an encrypted order (stores encrypted payload on-chain)
+    /// 
+    /// This is the standard Anchor instruction that accepts encrypted order data
+    /// from the client and stores it on-chain. The matching happens off-chain
+    /// in the Hybrid architecture.
+    pub fn submit_encrypted_order(
+        ctx: Context<SubmitEncryptedOrder>,
         cipher_payload: Vec<u8>,
         encrypted_amount: Vec<u8>,
     ) -> Result<()> {
@@ -97,8 +101,8 @@ pub mod shadow_swap {
         escrow.created_at = clock.unix_timestamp;
         escrow.bump = ctx.bumps.escrow;
 
-        // Transfer tokens to escrow (amount is encrypted, so we trust the client sent correct amount)
-        // In production, you'd verify the encrypted amount matches the actual transfer
+        // Transfer tokens to escrow
+        // Note: In production, the amount should be validated against the encrypted_amount
         token::transfer(
             CpiContext::new(
                 ctx.accounts.token_program.to_account_info(),
@@ -108,10 +112,10 @@ pub mod shadow_swap {
                     authority: ctx.accounts.owner.to_account_info(),
                 },
             ),
-            ctx.accounts.user_token_account.amount, // TODO: Parse from encrypted_amount in production
+            ctx.accounts.user_token_account.amount,
         )?;
 
-        msg!("Order placed: ID {}", order_id);
+        msg!("Encrypted order submitted: ID {}", order_id);
         Ok(())
     }
 
@@ -170,169 +174,10 @@ pub mod shadow_swap {
         Ok(())
     }
 
-    /// Match two orders (called by authorized keeper)
-    pub fn match_orders(
-        ctx: Context<MatchOrders>,
-        encrypted_match_amount: Vec<u8>,
-    ) -> Result<()> {
-        let callback_auth = &ctx.accounts.callback_auth;
-        let clock = Clock::get()?;
-
-        // Verify callback authorization
-        require!(
-            callback_auth.is_active,
-            ShadowSwapError::UnauthorizedCallback
-        );
-        require!(
-            callback_auth.expires_at > clock.unix_timestamp,
-            ShadowSwapError::CallbackAuthExpired
-        );
-
-        let buy_order = &mut ctx.accounts.buy_order;
-        let sell_order = &mut ctx.accounts.sell_order;
-
-        // Verify orders are active
-        require!(
-            buy_order.status == ORDER_STATUS_ACTIVE || buy_order.status == ORDER_STATUS_PARTIAL,
-            ShadowSwapError::InvalidOrderStatus
-        );
-        require!(
-            sell_order.status == ORDER_STATUS_ACTIVE || sell_order.status == ORDER_STATUS_PARTIAL,
-            ShadowSwapError::InvalidOrderStatus
-        );
-
-        // Update order statuses (simplified - in production, check if fully filled)
-        buy_order.status = ORDER_STATUS_PARTIAL;
-        buy_order.updated_at = clock.unix_timestamp;
-        buy_order.encrypted_remaining = encrypted_match_amount.clone();
-
-        sell_order.status = ORDER_STATUS_PARTIAL;
-        sell_order.updated_at = clock.unix_timestamp;
-        sell_order.encrypted_remaining = encrypted_match_amount;
-
-        msg!("Orders matched: {} <-> {}", buy_order.order_id, sell_order.order_id);
-        Ok(())
-    }
-
-    /// Match callback - Called by Arcium MPC after order matching
-    /// 
-    /// This function is called by the Arcium MPC network with the results
-    /// of the privacy-preserving matching algorithm. It processes each match
-    /// and updates order statuses accordingly.
-    /// 
-    /// NOTE: The #[arcium_callback] macro is a placeholder for the actual
-    /// Arcium integration. In production, this would be:
-    /// #[arcium_callback(mpc_program = "YOUR_MPC_PROGRAM_ID")]
-    pub fn match_callback(
-        ctx: Context<MatchCallback>,
-        results: Vec<MatchResult>,
-    ) -> Result<()> {
-        let callback_auth = &ctx.accounts.callback_auth;
-        let clock = Clock::get()?;
-        
-        // Verify callback authorization
-        require!(
-            callback_auth.is_active,
-            ShadowSwapError::UnauthorizedCallback
-        );
-        require!(
-            callback_auth.expires_at > clock.unix_timestamp,
-            ShadowSwapError::CallbackAuthExpired
-        );
-        
-        msg!("Processing {} match results", results.len());
-        
-        // Process each match result
-        for (idx, match_result) in results.iter().enumerate() {
-            msg!(
-                "Match {}: buyer={}, seller={}, buyer_order={}, seller_order={}",
-                idx,
-                match_result.buyer_pubkey,
-                match_result.seller_pubkey,
-                match_result.buyer_order_id,
-                match_result.seller_order_id
-            );
-            
-            // Load buyer's order
-            let order_book_key = ctx.accounts.order_book.key();
-            let buyer_order_id_bytes = match_result.buyer_order_id.to_le_bytes();
-            let buyer_order_seeds = [
-                b"order".as_ref(),
-                order_book_key.as_ref(),
-                &buyer_order_id_bytes,
-            ];
-            let (buyer_order_pda, _) = Pubkey::find_program_address(
-                &buyer_order_seeds,
-                ctx.program_id
-            );
-            
-            // Load seller's order
-            let seller_order_id_bytes = match_result.seller_order_id.to_le_bytes();
-            let seller_order_seeds = [
-                b"order".as_ref(),
-                order_book_key.as_ref(),
-                &seller_order_id_bytes,
-            ];
-            let (seller_order_pda, _) = Pubkey::find_program_address(
-                &seller_order_seeds,
-                ctx.program_id
-            );
-            
-            // Verify buyer order account matches expected PDA
-            require!(
-                buyer_order_pda == match_result.buyer_pubkey,
-                ShadowSwapError::InvalidOrderBook
-            );
-            
-            // Verify seller order account matches expected PDA
-            require!(
-                seller_order_pda == match_result.seller_pubkey,
-                ShadowSwapError::InvalidOrderBook
-            );
-            
-            // NOTE: In production, you would load these accounts using remaining_accounts
-            // and verify their status. For the MVP, we're documenting the intended logic:
-            //
-            // let buyer_order = &mut ctx.remaining_accounts[buyer_idx];
-            // let seller_order = &mut ctx.remaining_accounts[seller_idx];
-            //
-            // Verify both orders are active
-            // require!(
-            //     buyer_order.status == ORDER_STATUS_ACTIVE,
-            //     ShadowSwapError::OrderNotActive
-            // );
-            // require!(
-            //     seller_order.status == ORDER_STATUS_ACTIVE,
-            //     ShadowSwapError::OrderNotActive
-            // );
-            //
-            // Update order statuses to "Matched_Pending_Exec" (status = 5)
-            // buyer_order.status = ORDER_STATUS_MATCHED_PENDING;
-            // buyer_order.encrypted_remaining = match_result.encrypted_remaining.clone();
-            // buyer_order.updated_at = clock.unix_timestamp;
-            //
-            // seller_order.status = ORDER_STATUS_MATCHED_PENDING;
-            // seller_order.encrypted_remaining = match_result.encrypted_remaining.clone();
-            // seller_order.updated_at = clock.unix_timestamp;
-            
-            // Emit match queued event
-            emit!(MatchQueued {
-                order_book: ctx.accounts.order_book.key(),
-                buyer: match_result.buyer_pubkey,
-                seller: match_result.seller_pubkey,
-                buyer_order_id: match_result.buyer_order_id,
-                seller_order_id: match_result.seller_order_id,
-                encrypted_amount: match_result.encrypted_amount.clone(),
-                encrypted_price: match_result.encrypted_price.clone(),
-                timestamp: clock.unix_timestamp,
-            });
-        }
-        
-        msg!("Match callback processed {} matches", results.len());
-        Ok(())
-    }
-
     /// Create callback authorization for keeper
+    /// 
+    /// This allows the order book authority to authorize a keeper bot
+    /// to submit match results and execute settlements.
     pub fn create_callback_auth(
         ctx: Context<CreateCallbackAuth>,
         expires_at: i64,
@@ -354,6 +199,173 @@ pub mod shadow_swap {
         callback_auth.bump = ctx.bumps.callback_auth;
 
         msg!("Callback auth created for keeper: {}", ctx.accounts.keeper.key());
+        Ok(())
+    }
+
+    /// Submit match results and execute settlement
+    /// 
+    /// This instruction is called by the authorized keeper bot after matching orders
+    /// off-chain. It performs the actual token transfers to settle the trade.
+    /// 
+    /// Flow:
+    /// 1. Verify keeper authorization via callback_auth
+    /// 2. Calculate transfer amounts based on matched_amount and execution_price
+    /// 3. Transfer quote tokens (USDC) from buyer's escrow to seller
+    /// 4. Transfer base tokens (WSOL) from seller's escrow to buyer
+    /// 5. Update order statuses to "Executed"
+    /// 6. Emit settlement event
+    pub fn submit_match_results<'info>(
+        ctx: Context<'_, '_, '_, 'info, SubmitMatchResults<'info>>,
+        match_input: MatchResultInput,
+    ) -> Result<()> {
+        let callback_auth = &ctx.accounts.callback_auth;
+        let clock = Clock::get()?;
+
+        // Verify callback authorization
+        require!(
+            callback_auth.is_active,
+            ShadowSwapError::UnauthorizedCallback
+        );
+        require!(
+            callback_auth.expires_at > clock.unix_timestamp,
+            ShadowSwapError::CallbackAuthExpired
+        );
+        require!(
+            callback_auth.authority == ctx.accounts.keeper.key(),
+            ShadowSwapError::UnauthorizedCallback
+        );
+
+        let buyer_order = &mut ctx.accounts.buyer_order;
+        let seller_order = &mut ctx.accounts.seller_order;
+
+        // Verify orders are active or partially filled
+        require!(
+            buyer_order.status == ORDER_STATUS_ACTIVE || buyer_order.status == ORDER_STATUS_PARTIAL,
+            ShadowSwapError::InvalidOrderStatus
+        );
+        require!(
+            seller_order.status == ORDER_STATUS_ACTIVE || seller_order.status == ORDER_STATUS_PARTIAL,
+            ShadowSwapError::InvalidOrderStatus
+        );
+
+        // Parse remaining_accounts
+        // Expected order: [buyer_escrow_token, seller_escrow_token, buyer_token, seller_token]
+        require!(
+            ctx.remaining_accounts.len() == 4,
+            ShadowSwapError::InvalidTokenMint
+        );
+        
+        let buyer_escrow_token_info = ctx.remaining_accounts[0].clone();
+        let seller_escrow_token_info = ctx.remaining_accounts[1].clone();
+        let buyer_token_info = ctx.remaining_accounts[2].clone();
+        let seller_token_info = ctx.remaining_accounts[3].clone();
+
+        // Verify token accounts match escrow expectations
+        require!(
+            buyer_escrow_token_info.key() == ctx.accounts.buyer_escrow.token_account,
+            ShadowSwapError::InvalidEscrow
+        );
+        require!(
+            seller_escrow_token_info.key() == ctx.accounts.seller_escrow.token_account,
+            ShadowSwapError::InvalidEscrow
+        );
+
+        // Calculate transfer amounts
+        // matched_amount is in base token (WSOL) units
+        // execution_price is quote tokens (USDC) per base token
+        let quote_amount = match_input.matched_amount
+            .checked_mul(match_input.execution_price)
+            .ok_or(ShadowSwapError::NumericalOverflow)?;
+
+        msg!(
+            "Settling match: buyer={}, seller={}, amount={}, price={}, quote_total={}",
+            match_input.buyer_pubkey,
+            match_input.seller_pubkey,
+            match_input.matched_amount,
+            match_input.execution_price,
+            quote_amount
+        );
+
+        // Transfer quote tokens (USDC) from buyer's escrow to seller
+        let buyer_order_key = buyer_order.key();
+        let buyer_escrow_seeds = &[
+            ESCROW_SEED,
+            buyer_order_key.as_ref(),
+            &[ctx.accounts.buyer_escrow.bump],
+        ];
+        let buyer_escrow_signer = &[&buyer_escrow_seeds[..]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: buyer_escrow_token_info,
+                    to: seller_token_info,
+                    authority: ctx.accounts.buyer_escrow.to_account_info(),
+                },
+                buyer_escrow_signer,
+            ),
+            quote_amount,
+        )?;
+
+        // Transfer base tokens (WSOL) from seller's escrow to buyer
+        let seller_order_key = seller_order.key();
+        let seller_escrow_seeds = &[
+            ESCROW_SEED,
+            seller_order_key.as_ref(),
+            &[ctx.accounts.seller_escrow.bump],
+        ];
+        let seller_escrow_signer = &[&seller_escrow_seeds[..]];
+
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: seller_escrow_token_info,
+                    to: buyer_token_info,
+                    authority: ctx.accounts.seller_escrow.to_account_info(),
+                },
+                seller_escrow_signer,
+            ),
+            match_input.matched_amount,
+        )?;
+
+        // Update order statuses to Filled
+        buyer_order.status = ORDER_STATUS_FILLED;
+        buyer_order.updated_at = clock.unix_timestamp;
+
+        seller_order.status = ORDER_STATUS_FILLED;
+        seller_order.updated_at = clock.unix_timestamp;
+
+        // Update order book
+        let order_book = &mut ctx.accounts.order_book;
+        order_book.active_orders = order_book
+            .active_orders
+            .checked_sub(2) // Both orders are now filled
+            .ok_or(ShadowSwapError::NumericalOverflow)?;
+        order_book.last_trade_at = clock.unix_timestamp;
+
+        // Emit settlement event
+        emit!(TradeSettled {
+            order_book: order_book.key(),
+            buyer: match_input.buyer_pubkey,
+            seller: match_input.seller_pubkey,
+            buyer_order_id: buyer_order.order_id,
+            seller_order_id: seller_order.order_id,
+            base_amount: match_input.matched_amount,
+            quote_amount,
+            execution_price: match_input.execution_price,
+            timestamp: clock.unix_timestamp,
+        });
+
+        msg!(
+            "Trade settled: buyer_order={}, seller_order={}, base={}, quote={}",
+            buyer_order.order_id,
+            seller_order.order_id,
+            match_input.matched_amount,
+            quote_amount
+        );
+
         Ok(())
     }
 }
@@ -523,42 +535,42 @@ pub struct CallbackAuth {
 // Match Result Structures
 // ============================================================================
 
-/// Result of matching two orders from Arcium MPC
+/// Match result input for settlement (plaintext from keeper)
+/// 
+/// This struct contains the decrypted match details that the keeper bot
+/// submits to execute the trade settlement. The keeper has computed the
+/// matching off-chain and decrypted the results.
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Debug)]
-pub struct MatchResult {
+pub struct MatchResultInput {
     /// Buyer's order account pubkey
     pub buyer_pubkey: Pubkey,
     
     /// Seller's order account pubkey
     pub seller_pubkey: Pubkey,
     
-    /// Buyer's order ID
-    pub buyer_order_id: u64,
+    /// Matched amount in base token units (e.g., lamports for WSOL)
+    pub matched_amount: u64,
     
-    /// Seller's order ID
-    pub seller_order_id: u64,
-    
-    /// Matched amount (encrypted)
-    pub encrypted_amount: Vec<u8>,
-    
-    /// Execution price (encrypted)
-    pub encrypted_price: Vec<u8>,
+    /// Execution price: quote tokens per base token
+    /// (adjusted for decimals, e.g., USDC micro-units per WSOL lamport)
+    pub execution_price: u64,
 }
 
 // ============================================================================
 // Events
 // ============================================================================
 
-/// Event emitted when orders are matched and queued for execution
+/// Event emitted when a trade is settled
 #[event]
-pub struct MatchQueued {
+pub struct TradeSettled {
     pub order_book: Pubkey,
     pub buyer: Pubkey,
     pub seller: Pubkey,
     pub buyer_order_id: u64,
     pub seller_order_id: u64,
-    pub encrypted_amount: Vec<u8>,
-    pub encrypted_price: Vec<u8>,
+    pub base_amount: u64,
+    pub quote_amount: u64,
+    pub execution_price: u64,
     pub timestamp: i64,
 }
 
@@ -682,7 +694,7 @@ pub struct InitializeOrderBook<'info> {
 }
 
 #[derive(Accounts)]
-pub struct PlaceOrder<'info> {
+pub struct SubmitEncryptedOrder<'info> {
     #[account(
         mut,
         constraint = order_book.is_active @ ShadowSwapError::OrderBookNotActive
@@ -760,51 +772,6 @@ pub struct CancelOrder<'info> {
 }
 
 #[derive(Accounts)]
-pub struct MatchOrders<'info> {
-    #[account(
-        constraint = callback_auth.is_active @ ShadowSwapError::UnauthorizedCallback,
-        constraint = callback_auth.authority == keeper.key() @ ShadowSwapError::UnauthorizedCallback,
-        seeds = [CALLBACK_AUTH_SEED, order_book.key().as_ref(), keeper.key().as_ref()],
-        bump = callback_auth.bump
-    )]
-    pub callback_auth: Account<'info, CallbackAuth>,
-    
-    pub order_book: Account<'info, OrderBook>,
-    
-    #[account(
-        mut,
-        constraint = buy_order.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook
-    )]
-    pub buy_order: Account<'info, EncryptedOrder>,
-    
-    #[account(
-        mut,
-        constraint = sell_order.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook
-    )]
-    pub sell_order: Account<'info, EncryptedOrder>,
-    
-    pub keeper: Signer<'info>,
-}
-
-#[derive(Accounts)]
-pub struct MatchCallback<'info> {
-    #[account(
-        constraint = callback_auth.is_active @ ShadowSwapError::UnauthorizedCallback,
-        constraint = callback_auth.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook,
-        seeds = [CALLBACK_AUTH_SEED, order_book.key().as_ref(), keeper.key().as_ref()],
-        bump = callback_auth.bump
-    )]
-    pub callback_auth: Account<'info, CallbackAuth>,
-    
-    pub order_book: Account<'info, OrderBook>,
-    
-    pub keeper: Signer<'info>,
-    
-    // NOTE: In production, matched order accounts would be passed via remaining_accounts
-    // This allows for dynamic number of matches in a single callback
-}
-
-#[derive(Accounts)]
 pub struct CreateCallbackAuth<'info> {
     #[account(
         constraint = order_book.authority == authority.key() @ ShadowSwapError::UnauthorizedCallback
@@ -828,3 +795,59 @@ pub struct CreateCallbackAuth<'info> {
     
     pub system_program: Program<'info, System>,
 }
+
+#[derive(Accounts)]
+pub struct SubmitMatchResults<'info> {
+    /// Callback authorization - verifies keeper is authorized
+    #[account(
+        constraint = callback_auth.is_active @ ShadowSwapError::UnauthorizedCallback,
+        constraint = callback_auth.authority == keeper.key() @ ShadowSwapError::UnauthorizedCallback,
+        constraint = callback_auth.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook,
+        seeds = [CALLBACK_AUTH_SEED, order_book.key().as_ref(), keeper.key().as_ref()],
+        bump = callback_auth.bump
+    )]
+    pub callback_auth: Account<'info, CallbackAuth>,
+    
+    /// Order book
+    #[account(mut)]
+    pub order_book: Account<'info, OrderBook>,
+    
+    /// Buyer's order account
+    #[account(
+        mut,
+        constraint = buyer_order.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook
+    )]
+    pub buyer_order: Account<'info, EncryptedOrder>,
+    
+    /// Seller's order account
+    #[account(
+        mut,
+        constraint = seller_order.order_book == order_book.key() @ ShadowSwapError::InvalidOrderBook
+    )]
+    pub seller_order: Account<'info, EncryptedOrder>,
+    
+    /// Buyer's escrow account (holds quote tokens - USDC)
+    #[account(
+        mut,
+        seeds = [ESCROW_SEED, buyer_order.key().as_ref()],
+        bump = buyer_escrow.bump,
+        constraint = buyer_escrow.order == buyer_order.key() @ ShadowSwapError::InvalidEscrow
+    )]
+    pub buyer_escrow: Account<'info, Escrow>,
+    
+    /// Seller's escrow account (holds base tokens - WSOL)
+    #[account(
+        mut,
+        seeds = [ESCROW_SEED, seller_order.key().as_ref()],
+        bump = seller_escrow.bump,
+        constraint = seller_escrow.order == seller_order.key() @ ShadowSwapError::InvalidEscrow
+    )]
+    pub seller_escrow: Account<'info, Escrow>,
+    
+    /// Keeper account (authorized via callback_auth)
+    pub keeper: Signer<'info>,
+    
+    /// Token program for CPI calls
+    pub token_program: Program<'info, Token>,
+}
+
