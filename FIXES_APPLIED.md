@@ -40,7 +40,7 @@ if (!accountExists && transaction) {
 **Fix Applied:**
 ```bash
 # Updated .env.local:
-NEXT_PUBLIC_ORDER_BOOK_PUBKEY=J5NkY5hUS1DoMYXtyMt4dY87RFkbS7MD4eTH7YeKY8dn
+NEXT_PUBLIC_ORDER_BOOK_PUBKEY=CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
 ```
 
 **Files Modified:**
@@ -178,4 +178,3 @@ spl-token accounts --url devnet
 ---
 
 **All fixes applied! Ready to test.** 🎉
-

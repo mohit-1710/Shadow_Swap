@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-declare_id!("D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K");
+declare_id!("5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt");
 
 #[program]
 pub mod shadow_swap {
@@ -271,11 +271,17 @@ pub mod shadow_swap {
         );
 
         // Calculate transfer amounts
-        // matched_amount is in base token (WSOL) units
-        // execution_price is quote tokens (USDC) per base token
-        let quote_amount = match_input.matched_amount
-            .checked_mul(match_input.execution_price)
+        // matched_amount is in base token (WSOL) smallest units (lamports)
+        // execution_price is quote tokens (USDC) smallest units per base token
+        // Convert by dividing by base decimals factor so quote_amount is in quote smallest units
+        let quote_amount_u128 = (match_input.matched_amount as u128)
+            .checked_mul(match_input.execution_price as u128)
+            .ok_or(ShadowSwapError::NumericalOverflow)?
+            .checked_div(BASE_DECIMALS_FACTOR)
             .ok_or(ShadowSwapError::NumericalOverflow)?;
+
+        let quote_amount = u64::try_from(quote_amount_u128)
+            .map_err(|_| ShadowSwapError::NumericalOverflow)?;
 
         msg!(
             "Settling match: buyer={}, seller={}, amount={}, price={}, quote_total={}",
@@ -850,4 +856,5 @@ pub struct SubmitMatchResults<'info> {
     /// Token program for CPI calls
     pub token_program: Program<'info, Token>,
 }
-
+// Constants
+const BASE_DECIMALS_FACTOR: u128 = 1_000_000_000; // Lamports per SOL (assumes 9 decimal base mint)

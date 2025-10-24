@@ -3,8 +3,8 @@ const { Connection, PublicKey } = require("@solana/web3.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROGRAM_ID = "D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K";
-const ORDER_BOOK_PUBKEY = "12N5FWVgKmZRNmhGsYuVcias1aLPtrnEk1GkQqmtwEv2";
+const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
+const ORDER_BOOK_PUBKEY = "CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr";
 const RPC_URL = "https://api.devnet.solana.com";
 
 async function viewOrderBook() {
@@ -36,7 +36,8 @@ async function viewOrderBook() {
     console.log(`Authority:       ${orderBook.authority.toString()}`);
     console.log(`Order Count:     ${orderBook.orderCount.toString()}`);
     console.log(`Min Base Size:   ${orderBook.minBaseOrderSize.toString()}`);
-    console.log(`Fee Rate (bps):  ${orderBook.feeRateBps}`);
+    const feeBps = orderBook.feeBps ?? orderBook.feeRateBps ?? 'n/a';
+    console.log(`Fee Rate (bps):  ${feeBps}`);
     console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 
     // Fetch all orders
@@ -99,4 +100,3 @@ async function viewOrderBook() {
 }
 
 viewOrderBook();
-

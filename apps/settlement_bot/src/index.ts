@@ -553,8 +553,8 @@ async function main() {
   const config: KeeperConfig = {
     rpcUrl: process.env.RPC_URL || 'https://api.devnet.solana.com',
     wssUrl: process.env.WSS_URL,
-    programId: process.env.PROGRAM_ID || 'Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci',
-    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || '',
+    programId: process.env.PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt',
+    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr',
     keeperKeypairPath: process.env.KEEPER_KEYPAIR_PATH || '~/.config/solana/id.json',
     arciumMpcUrl: process.env.ARCIUM_MPC_URL || 'https://mpc.arcium.com',
     arciumClientId: process.env.ARCIUM_CLIENT_ID || '',

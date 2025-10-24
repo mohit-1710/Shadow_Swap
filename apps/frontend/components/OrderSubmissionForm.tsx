@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { Program, AnchorProvider, BN } from '@coral-xyz/anchor';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, createSyncNativeInstruction } from '@solana/spl-token';
 import { 
   getOrCreateAssociatedTokenAccount, 
   parseTokenAmount,
@@ -231,6 +231,34 @@ export default function OrderSubmissionForm({
       if (transaction.instructions.length > 0) {
         setStatus('📦 Creating token account (one-time ~0.002 SOL rent)...');
         console.log('Token account will be created during order submission');
+      }
+
+      // Auto-wrap SOL into WSOL for sell orders (so users don't have to pre-wrap)
+      if (side === 'sell') {
+        const currentWsolBalance = await getTokenBalance(connection, userTokenAccount);
+        const shortfall = amountBigInt > currentWsolBalance
+          ? amountBigInt - currentWsolBalance
+          : BigInt(0);
+        
+        if (shortfall > BigInt(0)) {
+          setStatus('💧 Wrapping SOL into WSOL for escrow...');
+          
+          if (shortfall > BigInt(Number.MAX_SAFE_INTEGER)) {
+            throw new Error('Order size is too large for automatic SOL wrapping');
+          }
+
+          transaction.add(
+            SystemProgram.transfer({
+              fromPubkey: wallet.publicKey,
+              toPubkey: userTokenAccount,
+              lamports: Number(shortfall),
+            })
+          );
+
+          transaction.add(
+            createSyncNativeInstruction(userTokenAccount, TOKEN_PROGRAM_ID)
+          );
+        }
       }
 
       // Create encrypted_amount (64 bytes to match MAX_ENCRYPTED_AMOUNT_SIZE)

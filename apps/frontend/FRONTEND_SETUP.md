@@ -21,7 +21,7 @@ yarn install
 
 1. **Create `.env.local`** from the example:
 ```bash
-cp .env.local.example .env.local
+cp env.example .env.local
 ```
 
 2. **Update environment variables**:
@@ -30,8 +30,11 @@ NEXT_PUBLIC_SOLANA_NETWORK=devnet
 NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
 
 # After deploying your Anchor program:
-NEXT_PUBLIC_PROGRAM_ID=<your_program_id>
-NEXT_PUBLIC_ORDER_BOOK_ADDRESS=<your_order_book_address>
+NEXT_PUBLIC_PROGRAM_ID=5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
+NEXT_PUBLIC_ORDER_BOOK_PUBKEY=CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
+NEXT_PUBLIC_BASE_MINT=So11111111111111111111111111111111111111112
+NEXT_PUBLIC_QUOTE_MINT=CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE
+NEXT_PUBLIC_REFRESH_INTERVAL=5000
 
 # Arcium SDK (when available):
 NEXT_PUBLIC_ARCIUM_API_KEY=<your_api_key>
@@ -99,6 +102,13 @@ PlainOrder → Uint8Array(24 bytes)
 // ↓ Submit to Anchor program
 submit_encrypted_order(cipher, nonce, order_id)
 ```
+
+### Native SOL Handling
+
+- Sell orders automatically wrap enough SOL into WSOL before escrow so traders don’t need to manage WSOL manually.
+- Cancelled sell orders piggyback a `closeAccount` instruction so any refunded WSOL is immediately unwrapped back to native SOL in the same transaction.
+- The form creates the WSOL associated token account (if missing), transfers only the shortfall, syncs native balance, and recreates the ATA on-demand.
+- The order dashboard polls using `NEXT_PUBLIC_REFRESH_INTERVAL` (default 5s) and raises a status feed whenever an order transitions to Filled/Executed so users see matches instantly.
 
 ### 2. Client-Side Encryption
 
@@ -170,7 +180,6 @@ import OrderSubmissionForm from '../components/OrderSubmissionForm';
 
 <OrderSubmissionForm
   programId={PROGRAM_ID}
-  orderBookAddress={ORDER_BOOK_ADDRESS}
   baseMintAddress={BASE_MINT}
   quoteMintAddress={QUOTE_MINT}
 />
@@ -282,4 +291,3 @@ yarn install
 
 **Status**: ✅ Ready for development testing  
 **Last Updated**: Phase 3 - Order Submission  
-

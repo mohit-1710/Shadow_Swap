@@ -7,6 +7,7 @@ Next.js-based frontend for ShadowSwap - a privacy-preserving DEX on Solana.
 This is the user interface for ShadowSwap, allowing users to:
 - Connect their Solana wallet
 - Place encrypted orders
+- Auto-manage WSOL: wrap SOL before sells, unwrap refunds, and surface live status updates when orders fill
 - View order status
 - Cancel orders
 - Trade with privacy
@@ -54,12 +55,15 @@ frontend/
 
 ## Environment Variables
 
-Create `.env.local`:
+Create `.env.local` (see `env.example` for current devnet values):
 
 ```env
 NEXT_PUBLIC_SOLANA_NETWORK=devnet
 NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
-NEXT_PUBLIC_PROGRAM_ID=<your-deployed-program-id>
+NEXT_PUBLIC_PROGRAM_ID=5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
+NEXT_PUBLIC_ORDER_BOOK_PUBKEY=CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
+NEXT_PUBLIC_BASE_MINT=So11111111111111111111111111111111111111112
+NEXT_PUBLIC_QUOTE_MINT=CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE
 ```
 
 ## Features (To Be Implemented)
@@ -79,4 +83,3 @@ NEXT_PUBLIC_PROGRAM_ID=<your-deployed-program-id>
 ## License
 
 MIT
-

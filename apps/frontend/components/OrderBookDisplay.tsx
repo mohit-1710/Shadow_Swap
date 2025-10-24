@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
-import { PublicKey } from '@solana/web3.js';
+import { PublicKey, Transaction } from '@solana/web3.js';
 import { getProgram, ORDER_STATUS } from '../lib/program';
+import { createCloseAccountInstruction } from '@solana/spl-token';
 
 interface DisplayOrder {
   publicKey: string;
@@ -19,6 +20,11 @@ export default function OrderBookDisplay() {
   const [error, setError] = useState('');
   const [cancelling, setCancelling] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<number | 'all'>('all');
+  const [statusFeed, setStatusFeed] = useState<string[]>([]);
+  const baseMint = new PublicKey(
+    process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112'
+  );
+  const orderStatusCache = useRef<Record<string, number>>({});
 
   const fetchOrders = async () => {
     if (!wallet.publicKey) {
@@ -58,6 +64,20 @@ export default function OrderBookDisplay() {
         createdAt: order.account.createdAt.toNumber(),
       }));
 
+      const prevStatuses = orderStatusCache.current;
+      const updates: string[] = [];
+      displayOrders.forEach(order => {
+        const prev = prevStatuses[order.publicKey];
+        if (prev !== undefined && prev !== order.status) {
+          const label = getStatusLabel(order.status);
+          updates.push(`Order #${order.orderId} is now ${label}`);
+        }
+        prevStatuses[order.publicKey] = order.status;
+      });
+      if (updates.length) {
+        setStatusFeed(prev => [...updates, ...prev].slice(0, 5));
+      }
+
       setOrders(displayOrders);
     } catch (err: any) {
       console.error('Error fetching orders:', err);
@@ -69,7 +89,7 @@ export default function OrderBookDisplay() {
 
   const cancelOrder = async (orderPubkey: string) => {
     if (!wallet.publicKey || !wallet.signTransaction) {
-      setError('Please connect your wallet');
+      setError('Please connect a wallet that supports direct signing');
       return;
     }
 
@@ -122,22 +142,49 @@ export default function OrderBookDisplay() {
         new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
       );
       
-      const tx = await program.methods
+      const cancelInstruction = await program.methods
         .cancelOrder()
         .accounts({
           order: orderPubkeyObj,
           escrow: escrowPda,
-          escrowTokenAccount: escrowTokenAccount,
-          userTokenAccount: userTokenAccount,
+          escrowTokenAccount,
+          userTokenAccount,
           orderBook: orderBookPubkey,
           owner: wallet.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .rpc();
+        .instruction();
 
-      console.log('✅ Order cancelled:', tx);
+      const transaction = new Transaction().add(cancelInstruction);
+
+      if (mintPubkey.equals(baseMint)) {
+        transaction.add(
+          createCloseAccountInstruction(
+            userTokenAccount,
+            wallet.publicKey,
+            wallet.publicKey
+          )
+        );
+      }
+
+      transaction.feePayer = wallet.publicKey;
+      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+      transaction.recentBlockhash = blockhash;
+
+      const signed = await wallet.signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize(), {
+        skipPreflight: false,
+        preflightCommitment: 'confirmed',
+      });
+
+      await connection.confirmTransaction(
+        { signature, blockhash, lastValidBlockHeight },
+        'confirmed'
+      );
+
+      console.log('✅ Order cancelled:', signature);
       
-      // Refresh orders
+      // Refresh orders & balances
       await fetchOrders();
     } catch (err: any) {
       console.error('Error cancelling order:', err);
@@ -150,15 +197,9 @@ export default function OrderBookDisplay() {
   useEffect(() => {
     fetchOrders();
 
-    // Auto-refresh if enabled
-    const autoRefresh = process.env.NEXT_PUBLIC_AUTO_REFRESH === 'true';
-    if (autoRefresh) {
-      const interval = setInterval(
-        fetchOrders,
-        parseInt(process.env.NEXT_PUBLIC_REFRESH_INTERVAL || '5000')
-      );
-      return () => clearInterval(interval);
-    }
+    const refreshEvery = parseInt(process.env.NEXT_PUBLIC_REFRESH_INTERVAL || '5000');
+    const interval = setInterval(fetchOrders, refreshEvery);
+    return () => clearInterval(interval);
   }, [connection, wallet.publicKey]);
 
   const getStatusLabel = (status: number): string => {
@@ -211,6 +252,24 @@ export default function OrderBookDisplay() {
 
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+      {statusFeed.length > 0 && (
+        <div style={{
+          marginBottom: '15px',
+          padding: '12px 16px',
+          background: '#e8f5e9',
+          border: '1px solid #4caf50',
+          borderRadius: '8px',
+          fontSize: '14px',
+          color: '#1b5e20'
+        }}>
+          <strong>Recent updates:</strong>
+          <ul style={{ margin: '8px 0 0 18px', padding: 0 }}>
+            {statusFeed.map((msg, idx) => (
+              <li key={`${msg}-${idx}`}>{msg}</li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div style={{ 
         display: 'flex', 
         justifyContent: 'space-between', 
@@ -412,4 +471,3 @@ export default function OrderBookDisplay() {
     </div>
   );
 }
-

@@ -11,14 +11,14 @@ const WalletMultiButton = dynamic(
 
 // Program configuration (deployed on devnet - Phase 4)
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || 'DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu'
+  process.env.NEXT_PUBLIC_PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt'
 );
 const BASE_MINT = new PublicKey(
   process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112'
 ); // Wrapped SOL
 const QUOTE_MINT = new PublicKey(
-  process.env.NEXT_PUBLIC_QUOTE_MINT || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'
-); // Test USDC (devnet)
+  process.env.NEXT_PUBLIC_QUOTE_MINT || 'CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE'
+); // Devnet USDC
 
 export default function Home() {
   return (

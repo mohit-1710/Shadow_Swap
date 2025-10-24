@@ -68,10 +68,10 @@ apps/anchor_program/
 #### `Anchor.toml`
 ```toml
 [programs.localnet]
-shadow_swap = "Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+shadow_swap = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt"
 
 [programs.devnet]
-shadow_swap = "Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci"
+shadow_swap = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt"
 ```
 
 #### `Cargo.toml` (root)
@@ -275,4 +275,3 @@ ls -lh target/types/shadow_swap.ts
 ✅ The new architecture provides flexibility to use any TEE solution while maintaining privacy guarantees.
 
 The project is now ready for the next phase: implementing the keeper bot with TEE integration for off-chain matching.
-

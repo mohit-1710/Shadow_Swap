@@ -78,6 +78,7 @@ cp .env.example .env
 #### Testing/Development
 - `USE_MOCK_ARCIUM`: Use mock Arcium client for testing (default: false)
 - `USE_MOCK_SANCTUM`: Use mock Sanctum client for testing (default: false)
+- `USE_DIRECT_RPC`: Submit matches directly via RPC (default: true; set to `false` to route via Sanctum)
 
 ## Usage
 
@@ -259,8 +260,8 @@ The keeper logs detailed information about each matching cycle:
 
 📍 Configuration:
    RPC URL:        https://api.devnet.solana.com
-   Program ID:     Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci
-   Order Book:     ABC...123
+   Program ID:     5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
+   Order Book:     CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
    Keeper Wallet:  DEF...456
    Match Interval: 10000ms
 
@@ -310,6 +311,7 @@ For testing without real Arcium MPC or Sanctum gateway:
 # .env
 USE_MOCK_ARCIUM=true
 USE_MOCK_SANCTUM=true
+USE_DIRECT_RPC=true
 ```
 
 This uses mock clients that simulate the real behavior without making external API calls.

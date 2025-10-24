@@ -419,8 +419,8 @@ pm2 stop shadowswap-keeper
 
 📍 Configuration:
    RPC URL:        https://api.devnet.solana.com
-   Program ID:     Dk9p88PPmrApGwhpTZAYQkuZApVHEnquxxeng1sCndci
-   Order Book:     9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin
+   Program ID:     5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
+   Order Book:     CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
    Keeper Wallet:  7xPZf6yXpNPTZ9nQP3mHvZLkEAVGjkW8sYQR9Kh1DqVN
    Match Interval: 10000ms
 
@@ -585,4 +585,3 @@ The ShadowSwap Keeper Bot is now **fully implemented** with:
 ✅ Full documentation and examples  
 
 The bot is production-ready and awaits deployment with proper credentials and authorization!
-

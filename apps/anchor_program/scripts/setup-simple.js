@@ -7,7 +7,7 @@ const { PublicKey, SystemProgram } = require("@solana/web3.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROGRAM_ID = "D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K";
+const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
 const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 const USDC_MINT = new PublicKey("CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE");
 
@@ -91,6 +91,7 @@ MAX_RETRIES=3
 RETRY_DELAY_MS=1000
 USE_MOCK_ARCIUM=true
 USE_MOCK_SANCTUM=true
+USE_DIRECT_RPC=true
 LOG_LEVEL=info
 `;
 
@@ -100,4 +101,3 @@ LOG_LEVEL=info
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });
-
