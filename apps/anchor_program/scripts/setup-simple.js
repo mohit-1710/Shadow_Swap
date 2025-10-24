@@ -7,9 +7,9 @@ const { PublicKey, SystemProgram } = require("@solana/web3.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROGRAM_ID = "DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu";
+const PROGRAM_ID = "D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K";
 const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
-const USDC_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
+const USDC_MINT = new PublicKey("CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE");
 
 async function main() {
   console.log("\n🚀 ShadowSwap Devnet Setup\n");

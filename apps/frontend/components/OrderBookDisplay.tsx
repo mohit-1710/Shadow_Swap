@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useConnection } from '@solana/wallet-adapter-react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey } from '@solana/web3.js';
 import { getProgram, ORDER_STATUS } from '../lib/program';
 
@@ -13,12 +13,19 @@ interface DisplayOrder {
 
 export default function OrderBookDisplay() {
   const { connection } = useConnection();
+  const wallet = useWallet();
   const [orders, setOrders] = useState<DisplayOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [cancelling, setCancelling] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<number | 'all'>('all');
 
   const fetchOrders = async () => {
+    if (!wallet.publicKey) {
+      setOrders([]);
+      return;
+    }
+
     try {
       setLoading(true);
       setError('');
@@ -32,26 +39,18 @@ export default function OrderBookDisplay() {
 
       const program = getProgram(connection, dummyWallet);
 
-      // Fetch all encrypted orders
-      const orderBookPubkeyStr = process.env.NEXT_PUBLIC_ORDER_BOOK_PUBKEY;
-      if (!orderBookPubkeyStr) {
-        setError('Order book address not configured');
-        return;
-      }
-      
-      const orderBookPubkey = new PublicKey(orderBookPubkeyStr);
-
+      // Fetch ONLY this user's orders (by owner)
       // Cast to any for dynamic account access (TypeScript limitation with Anchor IDL)
-      const allOrders = await (program.account as any).encryptedOrder.all([
+      const userOrders = await (program.account as any).encryptedOrder.all([
         {
           memcmp: {
-            offset: 8, // After discriminator
-            bytes: orderBookPubkey.toBase58(),
+            offset: 8, // After discriminator, owner field
+            bytes: wallet.publicKey.toBase58(),
           },
         },
       ]);
 
-      const displayOrders: DisplayOrder[] = allOrders.map((order: any) => ({
+      const displayOrders: DisplayOrder[] = userOrders.map((order: any) => ({
         publicKey: order.publicKey.toString(),
         owner: order.account.owner.toString(),
         orderId: order.account.orderId.toString(),
@@ -68,6 +67,86 @@ export default function OrderBookDisplay() {
     }
   };
 
+  const cancelOrder = async (orderPubkey: string) => {
+    if (!wallet.publicKey || !wallet.signTransaction) {
+      setError('Please connect your wallet');
+      return;
+    }
+
+    try {
+      setCancelling(orderPubkey);
+      setError('');
+
+      const program = getProgram(connection, wallet as any);
+      const orderPubkeyObj = new PublicKey(orderPubkey);
+      
+      // Fetch order to get token details
+      const orderAccount = await (program.account as any).encryptedOrder.fetch(orderPubkeyObj);
+      
+      // Derive escrow PDA
+      const [escrowPda] = PublicKey.findProgramAddressSync(
+        [Buffer.from('escrow'), orderPubkeyObj.toBuffer()],
+        program.programId
+      );
+      
+      // Fetch escrow to get token account
+      const escrowAccount = await (program.account as any).escrow.fetch(escrowPda);
+      const escrowTokenAccount = escrowAccount.tokenAccount;
+      
+      // Get order book
+      const orderBookPubkey = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK_PUBKEY!);
+      
+      // Get order book data to find the mint
+      const orderBookData = await (program.account as any).orderBook.fetch(orderBookPubkey);
+      
+      // Determine which mint based on order side (we'd need to decrypt, but for cancel we can check escrow)
+      // The escrow holds either base or quote tokens
+      const TOKEN_PROGRAM_ID = new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA');
+      
+      // Get user's token account for the same mint as escrow
+      const escrowTokenAccountInfo = await connection.getAccountInfo(escrowTokenAccount);
+      if (!escrowTokenAccountInfo) {
+        throw new Error('Escrow token account not found');
+      }
+      
+      // Parse token account to get mint (mint is at offset 0, 32 bytes)
+      const mintPubkey = new PublicKey(escrowTokenAccountInfo.data.slice(0, 32));
+      
+      // Derive user's ATA for this mint
+      const [userTokenAccount] = PublicKey.findProgramAddressSync(
+        [
+          wallet.publicKey.toBuffer(),
+          TOKEN_PROGRAM_ID.toBuffer(),
+          mintPubkey.toBuffer(),
+        ],
+        new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+      );
+      
+      const tx = await program.methods
+        .cancelOrder()
+        .accounts({
+          order: orderPubkeyObj,
+          escrow: escrowPda,
+          escrowTokenAccount: escrowTokenAccount,
+          userTokenAccount: userTokenAccount,
+          orderBook: orderBookPubkey,
+          owner: wallet.publicKey,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .rpc();
+
+      console.log('✅ Order cancelled:', tx);
+      
+      // Refresh orders
+      await fetchOrders();
+    } catch (err: any) {
+      console.error('Error cancelling order:', err);
+      setError(`Failed to cancel order: ${err.message}`);
+    } finally {
+      setCancelling(null);
+    }
+  };
+
   useEffect(() => {
     fetchOrders();
 
@@ -80,7 +159,7 @@ export default function OrderBookDisplay() {
       );
       return () => clearInterval(interval);
     }
-  }, [connection]);
+  }, [connection, wallet.publicKey]);
 
   const getStatusLabel = (status: number): string => {
     switch (status) {
@@ -120,6 +199,16 @@ export default function OrderBookDisplay() {
     ? orders
     : orders.filter(order => order.status === filterStatus);
 
+  if (!wallet.publicKey) {
+    return (
+      <div style={{ maxWidth: '1000px', margin: '0 auto', textAlign: 'center', padding: '40px' }}>
+        <p style={{ fontSize: '18px', color: '#666' }}>
+          🔐 Please connect your wallet to view your orders
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
       <div style={{ 
@@ -128,7 +217,7 @@ export default function OrderBookDisplay() {
         alignItems: 'center',
         marginBottom: '20px'
       }}>
-        <h2 style={{ margin: 0 }}>📊 Order Book</h2>
+        <h2 style={{ margin: 0 }}>📋 My Orders</h2>
         <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
           <select
             value={filterStatus}
@@ -197,14 +286,14 @@ export default function OrderBookDisplay() {
               <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>
                 Order ID
               </th>
-              <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>
-                Owner
-              </th>
               <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>
                 Status
               </th>
               <th style={{ padding: '12px', textAlign: 'left', fontWeight: 'bold' }}>
                 Created At
+              </th>
+              <th style={{ padding: '12px', textAlign: 'center', fontWeight: 'bold' }}>
+                Action
               </th>
             </tr>
           </thead>
@@ -223,55 +312,77 @@ export default function OrderBookDisplay() {
                 </td>
               </tr>
             ) : (
-              filteredOrders.map((order) => (
-                <tr
-                  key={order.publicKey}
-                  style={{
-                    borderBottom: '1px solid #eee',
-                    transition: 'background 0.2s'
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.background = '#f9f9f9';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.background = 'white';
-                  }}
-                >
-                  <td style={{ padding: '12px' }}>
-                    <code style={{ 
-                      fontSize: '12px',
-                      background: '#f5f5f5',
-                      padding: '4px 8px',
-                      borderRadius: '4px'
-                    }}>
-                      {order.orderId.slice(0, 12)}...
-                    </code>
-                  </td>
-                  <td style={{ padding: '12px' }}>
-                    <code style={{ fontSize: '12px' }}>
-                      {order.owner.slice(0, 8)}...{order.owner.slice(-6)}
-                    </code>
-                  </td>
-                  <td style={{ padding: '12px', textAlign: 'center' }}>
-                    <span
-                      style={{
-                        display: 'inline-block',
-                        padding: '4px 12px',
-                        borderRadius: '12px',
+              filteredOrders.map((order) => {
+                const canCancel = order.status === ORDER_STATUS.ACTIVE || order.status === ORDER_STATUS.PARTIAL;
+                const isCancelling = cancelling === order.publicKey;
+                
+                return (
+                  <tr
+                    key={order.publicKey}
+                    style={{
+                      borderBottom: '1px solid #eee',
+                      transition: 'background 0.2s'
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = '#f9f9f9';
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'white';
+                    }}
+                  >
+                    <td style={{ padding: '12px' }}>
+                      <code style={{ 
                         fontSize: '12px',
-                        fontWeight: 'bold',
-                        color: 'white',
-                        background: getStatusColor(order.status)
-                      }}
-                    >
-                      {getStatusLabel(order.status)}
-                    </span>
-                  </td>
-                  <td style={{ padding: '12px', fontSize: '13px' }}>
-                    {new Date(order.createdAt * 1000).toLocaleString()}
-                  </td>
-                </tr>
-              ))
+                        background: '#f5f5f5',
+                        padding: '4px 8px',
+                        borderRadius: '4px'
+                      }}>
+                        {order.orderId.slice(0, 12)}...
+                      </code>
+                    </td>
+                    <td style={{ padding: '12px', textAlign: 'center' }}>
+                      <span
+                        style={{
+                          display: 'inline-block',
+                          padding: '4px 12px',
+                          borderRadius: '12px',
+                          fontSize: '12px',
+                          fontWeight: 'bold',
+                          color: 'white',
+                          background: getStatusColor(order.status)
+                        }}
+                      >
+                        {getStatusLabel(order.status)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '12px', fontSize: '13px' }}>
+                      {new Date(order.createdAt * 1000).toLocaleString()}
+                    </td>
+                    <td style={{ padding: '12px', textAlign: 'center' }}>
+                      {canCancel ? (
+                        <button
+                          onClick={() => cancelOrder(order.publicKey)}
+                          disabled={isCancelling}
+                          style={{
+                            padding: '6px 16px',
+                            background: isCancelling ? '#ccc' : '#f44336',
+                            color: 'white',
+                            border: 'none',
+                            borderRadius: '6px',
+                            cursor: isCancelling ? 'not-allowed' : 'pointer',
+                            fontWeight: 'bold',
+                            fontSize: '12px'
+                          }}
+                        >
+                          {isCancelling ? '⏳ Cancelling...' : '❌ Cancel'}
+                        </button>
+                      ) : (
+                        <span style={{ color: '#999', fontSize: '12px' }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -287,12 +398,13 @@ export default function OrderBookDisplay() {
           border: '1px solid #2196f3'
         }}
       >
-        <strong>ℹ️ Privacy Notice:</strong>
+        <strong>ℹ️ About Your Orders:</strong>
         <ul style={{ marginTop: '8px', paddingLeft: '20px', marginBottom: 0 }}>
-          <li>Order details (price, amount, side) are encrypted and not displayed</li>
+          <li>Order details (price, amount, side) are encrypted for privacy</li>
           <li>Only authorized keeper bots can decrypt and match orders</li>
+          <li>You can cancel Active or Partial orders at any time</li>
           <li>
-            Showing {filteredOrders.length} order{filteredOrders.length !== 1 ? 's' : ''}
+            Showing {filteredOrders.length} of your order{filteredOrders.length !== 1 ? 's' : ''}
             {filterStatus !== 'all' && ` (filtered by ${getStatusLabel(filterStatus as number)})`}
           </li>
         </ul>

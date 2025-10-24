@@ -9,7 +9,7 @@ skip-lint = false
 shadow_swap = "DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu"
 
 [programs.devnet]
-shadow_swap = "DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu"
+shadow_swap = "D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K"
 
 [registry]
 url = "https://api.apr.dev"

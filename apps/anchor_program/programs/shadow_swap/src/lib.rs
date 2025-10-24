@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer};
 
-declare_id!("DcCs5AEhd6Sx5opAjhkpNUtNSQwQf7GV3UU7JsfxcvXu");
+declare_id!("D1gSf58XLm4VN5BqLai5d21fQngz4D7GWXZDPKieW7K");
 
 #[program]
 pub mod shadow_swap {
