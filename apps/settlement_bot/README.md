@@ -261,7 +261,7 @@ The keeper logs detailed information about each matching cycle:
 📍 Configuration:
    RPC URL:        https://api.devnet.solana.com
    Program ID:     5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
-   Order Book:     CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
+   Order Book:     FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8
    Keeper Wallet:  DEF...456
    Match Interval: 10000ms
 

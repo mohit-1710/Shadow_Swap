@@ -4,7 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
-const ORDER_BOOK_PUBKEY = "CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr";
+const ORDER_BOOK_PUBKEY = "FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8";
 const RPC_URL = "https://api.devnet.solana.com";
 
 async function viewOrderBook() {

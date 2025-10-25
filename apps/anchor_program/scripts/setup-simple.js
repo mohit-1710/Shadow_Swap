@@ -9,7 +9,7 @@ const path = require("path");
 
 const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
 const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
-const USDC_MINT = new PublicKey("CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE");
+const USDC_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 
 async function main() {
   console.log("\n🚀 ShadowSwap Devnet Setup\n");

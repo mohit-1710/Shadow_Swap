@@ -4,7 +4,7 @@
  * Sanctum provides MEV protection by routing transactions through private mempools.
  */
 
-import { Connection, Transaction } from '@solana/web3.js';
+import { Connection, Transaction, SendTransactionError } from '@solana/web3.js';
 import { SanctumSubmitResponse } from './types';
 
 /**
@@ -243,6 +243,9 @@ export class DirectRPCClient extends SanctumClient {
         console.log(`   ✅ Transaction confirmed: ${signature}`);
         return { signature };
       } catch (error) {
+        if (error instanceof SendTransactionError && error.logs) {
+          console.error('   🧾 Simulation logs:\n' + error.logs.map(log => `      ${log}`).join('\n'));
+        }
         lastError = error instanceof Error ? error.message : String(error);
         console.warn(`   ⚠️  Attempt ${attempt} failed: ${lastError}`);
         
@@ -258,4 +261,3 @@ export class DirectRPCClient extends SanctumClient {
     return { error: lastError || 'Unknown error' };
   }
 }
-

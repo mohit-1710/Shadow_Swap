@@ -13,10 +13,11 @@ import {
   PublicKey,
   Keypair,
   Transaction,
+  TransactionInstruction,
 } from '@solana/web3.js';
 import * as anchor from '@coral-xyz/anchor';
 import { AnchorProvider, Program, BN, Idl } from '@coral-xyz/anchor';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, createAssociatedTokenAccountInstruction, ASSOCIATED_TOKEN_PROGRAM_ID, getAssociatedTokenAddressSync } from '@solana/spl-token';
 import * as fs from 'fs';
 import * as path from 'path';
 import dotenv from 'dotenv';
@@ -37,6 +38,9 @@ import {
 } from './matcher';
 
 dotenv.config();
+
+const BASE_DECIMALS = 1_000_000_000n; // SOL decimals
+const U64_MAX = 18446744073709551615n;
 
 /**
  * Main Keeper Bot class
@@ -261,32 +265,48 @@ class ShadowSwapKeeper {
         }
 
         try {
-          // Parse plaintext order data
           const orderData = JSON.parse(result.plaintext);
+          const side = Number(orderData.side);
+          if (!Number.isInteger(side) || (side !== 0 && side !== 1)) {
+            console.warn(`   ⚠️  Invalid side for order ${encryptedOrders[i].publicKey.toBase58()}: ${orderData.side}`);
+            continue;
+          }
+
+          const priceBigInt = this.parseBigInt(orderData.price);
+          const amountBigInt = this.parseBigInt(orderData.amount);
+          const remainingBigInt = this.parseBigInt(orderData.remainingAmount ?? orderData.amount);
+
+          if (priceBigInt === null || amountBigInt === null || remainingBigInt === null) {
+            console.warn(`   ⚠️  Invalid numeric fields for order ${encryptedOrders[i].publicKey.toBase58()}`);
+            continue;
+          }
+
+          if (priceBigInt < 0n || amountBigInt <= 0n || remainingBigInt <= 0n) {
+            console.warn(`   ⚠️  Non-positive price/amount for order ${encryptedOrders[i].publicKey.toBase58()}`);
+            continue;
+          }
+
+          const decryptedOwner = orderData.owner || orderData.ownerPubkey || orderData.ownerPublicKey;
+          if (decryptedOwner && decryptedOwner !== encryptedOrders[i].owner.toBase58()) {
+            console.warn(`   ⚠️  Owner mismatch for order ${encryptedOrders[i].publicKey.toBase58()}`);
+            continue;
+          }
           
-          // Helper to safely parse BN or hex string to number
-          const toNumber = (val: any): number => {
-            if (typeof val === 'number') return val;
-            if (typeof val === 'string') return parseInt(val, 16);
-            if (val && typeof val.toNumber === 'function') return val.toNumber();
-            return 0;
-          };
-          
-          const plainOrder = {
+          const plainOrder: PlainOrder = {
             publicKey: encryptedOrders[i].publicKey,
             owner: encryptedOrders[i].owner,
             orderBook: encryptedOrders[i].orderBook,
-            side: orderData.side,
-            price: parseFloat(orderData.price),
-            amount: parseFloat(orderData.amount),
-            remainingAmount: parseFloat(orderData.remainingAmount || orderData.amount),
+            side: side as 0 | 1,
+            price: priceBigInt,
+            amount: amountBigInt,
+            remainingAmount: remainingBigInt,
             escrow: encryptedOrders[i].escrow,
-            createdAt: toNumber(encryptedOrders[i].createdAt),
-            orderId: toNumber(encryptedOrders[i].orderId),
+            createdAt: encryptedOrders[i].createdAt.toNumber(),
+            orderId: encryptedOrders[i].orderId.toNumber(),
             status: encryptedOrders[i].status,
           };
           
-          console.log(`   🔍 Order #${i}: side=${plainOrder.side}, price=${plainOrder.price}, amount=${plainOrder.amount}`);
+          console.log(`   🔍 Order #${i}: side=${plainOrder.side}, price=${plainOrder.price.toString()}, amount=${plainOrder.amount.toString()}`);
           plainOrders.push(plainOrder);
         } catch (parseError) {
           console.warn(`   ⚠️  Failed to parse order #${i}:`, parseError);
@@ -312,6 +332,15 @@ class ShadowSwapKeeper {
 
     // Build transactions for each match
     for (const match of matches) {
+      if (match.matchedAmount <= 0n) {
+        console.warn('   ⚠️  Skipping match with zero amount');
+        continue;
+      }
+      if (match.executionPrice <= 0n) {
+        console.warn('   ⚠️  Skipping match with zero price');
+        continue;
+      }
+
       try {
         const tx = await this.buildSettlementTransaction(match);
         transactions.push(tx);
@@ -355,9 +384,33 @@ class ShadowSwapKeeper {
   private async buildSettlementTransaction(
     match: MatchedPair
   ): Promise<Transaction> {
-    // Convert amounts to BN (already in raw units from decryption)
-    const matchedAmount = new BN(Math.floor(match.matchedAmount));
-    const executionPrice = new BN(Math.floor(match.executionPrice));
+    const matchAmountBigInt = match.matchedAmount;
+    const executionPriceBigInt = match.executionPrice;
+
+    if (matchAmountBigInt <= 0n) {
+      throw new Error('Matched amount must be positive');
+    }
+
+    if (executionPriceBigInt <= 0n) {
+      throw new Error('Execution price must be positive');
+    }
+
+    if (matchAmountBigInt > U64_MAX) {
+      throw new Error(`Matched amount ${matchAmountBigInt.toString()} exceeds u64 range`);
+    }
+
+    const quoteAmountBigInt = (matchAmountBigInt * executionPriceBigInt) / BASE_DECIMALS;
+
+    if (quoteAmountBigInt <= 0n) {
+      throw new Error('Quote amount underflow, check pricing decimals');
+    }
+
+    if (quoteAmountBigInt > U64_MAX) {
+      throw new Error(`Quote amount ${quoteAmountBigInt.toString()} exceeds u64 range`);
+    }
+
+    const matchedAmountBn = new BN(matchAmountBigInt.toString());
+    const executionPriceBn = new BN(executionPriceBigInt.toString());
 
     // Get escrow accounts - they contain the token account addresses
     const buyerEscrowData = await (this.program.account as any).escrow.fetch(match.buyOrder.escrow);
@@ -371,14 +424,64 @@ class ShadowSwapKeeper {
     const sellerEscrowTokenAccount = sellerEscrowData.tokenAccount;
     
     // User token accounts (derive ATAs)
-    const buyerTokenAccount = await this.getUserTokenAccount(
+    const buyerTokenAccount = this.getAssociatedTokenAccount(
       match.buyOrder.owner,
       orderBookData.baseMint
     );
-    const sellerTokenAccount = await this.getUserTokenAccount(
+    const sellerTokenAccount = this.getAssociatedTokenAccount(
       match.sellOrder.owner,
       orderBookData.quoteMint
     );
+
+    const preInstructions: TransactionInstruction[] = [];
+
+    const buyerTokenInfo = await this.connection.getAccountInfo(buyerTokenAccount);
+    if (!buyerTokenInfo) {
+      console.log(`   ⚠️  Buyer base ATA missing, creating ${buyerTokenAccount.toBase58()}`);
+      preInstructions.push(
+        createAssociatedTokenAccountInstruction(
+          this.keeper.publicKey,
+          buyerTokenAccount,
+          match.buyOrder.owner,
+          orderBookData.baseMint,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
+
+    const sellerTokenInfo = await this.connection.getAccountInfo(sellerTokenAccount);
+    if (!sellerTokenInfo) {
+      console.log(`   ⚠️  Seller quote ATA missing, creating ${sellerTokenAccount.toBase58()}`);
+      preInstructions.push(
+        createAssociatedTokenAccountInstruction(
+          this.keeper.publicKey,
+          sellerTokenAccount,
+          match.sellOrder.owner,
+          orderBookData.quoteMint,
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        )
+      );
+    }
+
+    const buyerEscrowBalanceInfo = await this.connection.getTokenAccountBalance(buyerEscrowTokenAccount).catch(() => null);
+    const sellerEscrowBalanceInfo = await this.connection.getTokenAccountBalance(sellerEscrowTokenAccount).catch(() => null);
+
+    const buyerEscrowAmount = buyerEscrowBalanceInfo ? BigInt(buyerEscrowBalanceInfo.value.amount) : 0n;
+    const sellerEscrowAmount = sellerEscrowBalanceInfo ? BigInt(sellerEscrowBalanceInfo.value.amount) : 0n;
+
+    if (buyerEscrowAmount < quoteAmountBigInt) {
+      throw new Error(
+        `Buyer escrow underfunded. Need ${quoteAmountBigInt.toString()} quote units, have ${buyerEscrowAmount.toString()}`
+      );
+    }
+
+    if (sellerEscrowAmount < matchAmountBigInt) {
+      throw new Error(
+        `Seller escrow underfunded. Need ${matchAmountBigInt.toString()} base units, have ${sellerEscrowAmount.toString()}`
+      );
+    }
 
     // Build the instruction
     // Token accounts are passed as remaining_accounts to reduce stack size
@@ -386,8 +489,8 @@ class ShadowSwapKeeper {
       .submitMatchResults({
         buyerPubkey: match.buyOrder.publicKey,
         sellerPubkey: match.sellOrder.publicKey,
-        matchedAmount,
-        executionPrice,
+        matchedAmount: matchedAmountBn,
+        executionPrice: executionPriceBn,
       })
       .accounts({
         callbackAuth: this.callbackAuth,
@@ -409,7 +512,9 @@ class ShadowSwapKeeper {
       .instruction();
 
     // Create and sign transaction
-    const tx = new Transaction().add(ix);
+    const tx = new Transaction();
+    preInstructions.forEach((instruction) => tx.add(instruction));
+    tx.add(ix);
     tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
     tx.feePayer = this.keeper.publicKey;
     tx.sign(this.keeper);
@@ -488,17 +593,14 @@ class ShadowSwapKeeper {
     return callbackAuth;
   }
 
-  private async getUserTokenAccount(
-    owner: PublicKey,
-    mint: PublicKey
-  ): Promise<PublicKey> {
-    // In production, fetch the actual token account
-    // For now, derive ATA
-    const [ata] = PublicKey.findProgramAddressSync(
-      [owner.toBuffer(), TOKEN_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-      new PublicKey('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
+  private getAssociatedTokenAccount(owner: PublicKey, mint: PublicKey): PublicKey {
+    return getAssociatedTokenAddressSync(
+      mint,
+      owner,
+      false,
+      TOKEN_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
     );
-    return ata;
   }
 
   private createArciumClient(): ArciumClient {
@@ -543,6 +645,31 @@ class ShadowSwapKeeper {
       console.error('Stack trace:', error.stack);
     }
   }
+
+  private parseBigInt(value: any): bigint | null {
+    try {
+      if (typeof value === 'bigint') {
+        return value;
+      }
+      if (typeof value === 'number') {
+        if (!Number.isFinite(value)) return null;
+        return BigInt(Math.trunc(value));
+      }
+      if (typeof value === 'string') {
+        if (value.trim() === '') return null;
+        return BigInt(value.trim());
+      }
+      if (value && typeof value.toString === 'function') {
+        const str = value.toString();
+        if (str) {
+          return BigInt(str);
+        }
+      }
+    } catch (error) {
+      console.warn('   ⚠️  Failed to parse bigint value:', error);
+    }
+    return null;
+  }
 }
 
 /**
@@ -554,7 +681,7 @@ async function main() {
     rpcUrl: process.env.RPC_URL || 'https://api.devnet.solana.com',
     wssUrl: process.env.WSS_URL,
     programId: process.env.PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt',
-    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr',
+    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8',
     keeperKeypairPath: process.env.KEEPER_KEYPAIR_PATH || '~/.config/solana/id.json',
     arciumMpcUrl: process.env.ARCIUM_MPC_URL || 'https://mpc.arcium.com',
     arciumClientId: process.env.ARCIUM_CLIENT_ID || '',

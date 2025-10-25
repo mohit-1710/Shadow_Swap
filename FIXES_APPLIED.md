@@ -40,7 +40,7 @@ if (!accountExists && transaction) {
 **Fix Applied:**
 ```bash
 # Updated .env.local:
-NEXT_PUBLIC_ORDER_BOOK_PUBKEY=CXSiQhcozGCvowrC4QFGHQi1BJwWdfw2ZEjhDawMK3Rr
+NEXT_PUBLIC_ORDER_BOOK_PUBKEY=FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8
 ```
 
 **Files Modified:**

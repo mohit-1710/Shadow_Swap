@@ -17,7 +17,7 @@ const BASE_MINT = new PublicKey(
   process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112'
 ); // Wrapped SOL
 const QUOTE_MINT = new PublicKey(
-  process.env.NEXT_PUBLIC_QUOTE_MINT || 'CrkXs142BgVrLrkrSGXNXgFztT5mxKyzWJjtHw3rDagE'
+  process.env.NEXT_PUBLIC_QUOTE_MINT || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU'
 ); // Devnet USDC
 
 export default function Home() {

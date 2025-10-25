@@ -323,6 +323,9 @@ pub mod shadow_swap {
         ];
         let seller_escrow_signer = &[&seller_escrow_seeds[..]];
 
+        let base_amount = u64::try_from(match_input.matched_amount)
+            .map_err(|_| ShadowSwapError::NumericalOverflow)?;
+
         token::transfer(
             CpiContext::new_with_signer(
                 ctx.accounts.token_program.to_account_info(),
@@ -333,7 +336,7 @@ pub mod shadow_swap {
                 },
                 seller_escrow_signer,
             ),
-            match_input.matched_amount,
+            base_amount,
         )?;
 
         // Update order statuses to Filled

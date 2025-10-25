@@ -13,6 +13,11 @@ import { deriveOrderBookPda } from '../lib/program';
 import { encryptOrderWithArcium, PlainOrder, validateOrder } from '../lib/arcium';
 import ShadowSwapIDL from '../idl/shadow_swap.json';
 
+const BASE_DECIMALS = 1_000_000_000n; // SOL/WSOL (lamports)
+const QUOTE_DECIMALS = 1_000_000n; // USDC (micro units)
+const TOKEN_ACCOUNT_SIZE = 165;
+const LAMPORT_FEE_BUFFER = 5_000n;
+
 interface OrderSubmissionFormProps {
   programId: PublicKey;
   baseMintAddress: PublicKey;
@@ -140,6 +145,10 @@ export default function OrderSubmissionForm({
       // Parse and validate inputs
       const amountBigInt = parseTokenAmount(amount, 9); // SOL has 9 decimals
       const priceBigInt = parseTokenAmount(price, 6); // USDC has 6 decimals
+      const quoteNeeded = ((amountBigInt * priceBigInt) + (BASE_DECIMALS - 1n)) / BASE_DECIMALS;
+      if (quoteNeeded <= 0n) {
+        throw new Error('Calculated quote amount is too small. Increase price or amount.');
+      }
       
       // Create plain order
       const plainOrder: PlainOrder = {
@@ -217,8 +226,11 @@ export default function OrderSubmissionForm({
       // This will automatically add create instructions if the account doesn't exist
       // The user will pay ~0.00204 SOL rent for account creation
       const transaction = new Transaction();
+      const walletAccountInfo = await connection.getAccountInfo(wallet.publicKey);
+      const walletLamports = BigInt(walletAccountInfo?.lamports ?? 0);
       
       setStatus('🔍 Checking token accounts...');
+      const initialInstructionCount = transaction.instructions.length;
       const userTokenAccount = await getOrCreateAssociatedTokenAccount(
         connection,
         tokenMint,
@@ -226,11 +238,40 @@ export default function OrderSubmissionForm({
         wallet.publicKey,
         transaction
       );
+      const createdTokenAccount = transaction.instructions.length > initialInstructionCount;
       
-      // If transaction has instructions, it means we're creating the account
-      if (transaction.instructions.length > 0) {
+      // If transaction has instructions already, it means we're creating the account
+      if (createdTokenAccount) {
         setStatus('📦 Creating token account (one-time ~0.002 SOL rent)...');
         console.log('Token account will be created during order submission');
+      }
+
+      let rentExemptLamports = 0n;
+      if (createdTokenAccount) {
+        const rentAmount = await connection.getMinimumBalanceForRentExemption(TOKEN_ACCOUNT_SIZE);
+        rentExemptLamports = BigInt(rentAmount);
+      }
+
+      if (side === 'buy') {
+        const currentQuoteBalance = await getTokenBalance(connection, userTokenAccount);
+        if (currentQuoteBalance < quoteNeeded) {
+          setStatus(
+            `❌ Not enough USDC. Need ${formatTokenAmount(quoteNeeded, 6)} USDC, have ${formatTokenAmount(currentQuoteBalance, 6)} USDC`
+          );
+          setIsSubmitting(false);
+          return;
+        }
+
+        if (rentExemptLamports > 0n) {
+          const lamportsNeeded = rentExemptLamports + LAMPORT_FEE_BUFFER;
+          if (walletLamports < lamportsNeeded) {
+            setStatus(
+              `❌ Not enough SOL to create the USDC token account. Need ${formatTokenAmount(lamportsNeeded, 9)} SOL, have ${formatTokenAmount(walletLamports, 9)} SOL`
+            );
+            setIsSubmitting(false);
+            return;
+          }
+        }
       }
 
       // Auto-wrap SOL into WSOL for sell orders (so users don't have to pre-wrap)
@@ -239,26 +280,36 @@ export default function OrderSubmissionForm({
         const shortfall = amountBigInt > currentWsolBalance
           ? amountBigInt - currentWsolBalance
           : BigInt(0);
-        
-        if (shortfall > BigInt(0)) {
-          setStatus('💧 Wrapping SOL into WSOL for escrow...');
-          
-          if (shortfall > BigInt(Number.MAX_SAFE_INTEGER)) {
-            throw new Error('Order size is too large for automatic SOL wrapping');
-          }
+        const lamportsNeededForWrap = shortfall > 0n ? shortfall : 0n;
+        const totalLamportsNeeded = lamportsNeededForWrap + rentExemptLamports + LAMPORT_FEE_BUFFER;
 
-          transaction.add(
-            SystemProgram.transfer({
-              fromPubkey: wallet.publicKey,
-              toPubkey: userTokenAccount,
-              lamports: Number(shortfall),
-            })
+        if (totalLamportsNeeded > 0n && walletLamports < totalLamportsNeeded) {
+          setStatus(
+            `❌ Not enough SOL. Need ${formatTokenAmount(totalLamportsNeeded, 9)} SOL to wrap and cover rent, have ${formatTokenAmount(walletLamports, 9)} SOL`
           );
-
-          transaction.add(
-            createSyncNativeInstruction(userTokenAccount, TOKEN_PROGRAM_ID)
-          );
+          setIsSubmitting(false);
+          return;
         }
+        
+      if (shortfall > BigInt(0)) {
+        setStatus('💧 Wrapping SOL into WSOL for escrow...');
+        
+        if (shortfall > BigInt(Number.MAX_SAFE_INTEGER)) {
+          throw new Error('Order size is too large for automatic SOL wrapping');
+        }
+
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: wallet.publicKey,
+            toPubkey: userTokenAccount,
+            lamports: Number(shortfall),
+          })
+        );
+
+        transaction.add(
+          createSyncNativeInstruction(userTokenAccount, TOKEN_PROGRAM_ID)
+        );
+      }
       }
 
       // Create encrypted_amount (64 bytes to match MAX_ENCRYPTED_AMOUNT_SIZE)

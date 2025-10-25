@@ -26,27 +26,27 @@ export function matchOrders(orders: PlainOrder[]): MatchedPair[] {
   // Separate buy and sell orders
   // Side can be: 0 (buy), 1 (sell), 'buy', or 'sell'
   const buyOrders = orders
-    .filter(o => (o.side === 0 || o.side === 'buy') && o.remainingAmount > 0)
+    .filter(o => (o.side === 0 || o.side === 'buy') && o.remainingAmount > 0n)
     .sort((a, b) => {
       // Sort by price descending, then timestamp ascending
       if (b.price !== a.price) {
-        return b.price - a.price;
+        return b.price > a.price ? 1 : -1;
       }
       return a.createdAt - b.createdAt;
     });
 
   const sellOrders = orders
-    .filter(o => (o.side === 1 || o.side === 'sell') && o.remainingAmount > 0)
+    .filter(o => (o.side === 1 || o.side === 'sell') && o.remainingAmount > 0n)
     .sort((a, b) => {
       // Sort by price ascending, then timestamp ascending
       if (a.price !== b.price) {
-        return a.price - b.price;
+        return a.price > b.price ? 1 : -1;
       }
       return a.createdAt - b.createdAt;
     });
 
-  console.log(`   📈 ${buyOrders.length} buy orders (highest bid: ${buyOrders[0]?.price || 'N/A'})`);
-  console.log(`   📉 ${sellOrders.length} sell orders (lowest ask: ${sellOrders[0]?.price || 'N/A'})`);
+  console.log(`   📈 ${buyOrders.length} buy orders (highest bid: ${buyOrders[0]?.price?.toString() || 'N/A'})`);
+  console.log(`   📉 ${sellOrders.length} sell orders (lowest ask: ${sellOrders[0]?.price?.toString() || 'N/A'})`);
 
   const matches: MatchedPair[] = [];
 
@@ -67,11 +67,22 @@ export function matchOrders(orders: PlainOrder[]): MatchedPair[] {
       break; // No more matches possible
     }
 
+    if (buyOrder.publicKey.equals(sellOrder.publicKey)) {
+      console.warn(`   ⚠️  Skipping self-match for order ${buyOrder.publicKey.toBase58()}`);
+      buyIdx++;
+      continue;
+    }
+
     // Calculate matched amount
-    const matchedAmount = Math.min(
-      buyOrder.remainingAmount,
-      sellOrder.remainingAmount
-    );
+    const matchedAmount = buyOrder.remainingAmount < sellOrder.remainingAmount
+      ? buyOrder.remainingAmount
+      : sellOrder.remainingAmount;
+
+    if (matchedAmount <= 0n) {
+      if (buyOrder.remainingAmount <= 0n) buyIdx++;
+      if (sellOrder.remainingAmount <= 0n) sellIdx++;
+      continue;
+    }
 
     // Determine execution price (time priority: maker's price)
     // The order that was placed first (maker) gets their price
@@ -88,9 +99,9 @@ export function matchOrders(orders: PlainOrder[]): MatchedPair[] {
     });
 
     console.log(
-      `   ✅ Match found: Buy #${buyOrder.orderId} @ ${buyOrder.price} ` +
-      `<-> Sell #${sellOrder.orderId} @ ${sellOrder.price} | ` +
-      `Amount: ${matchedAmount} @ ${executionPrice}`
+      `   ✅ Match found: Buy #${buyOrder.orderId} @ ${buyOrder.price.toString()} ` +
+      `<-> Sell #${sellOrder.orderId} @ ${sellOrder.price.toString()} | ` +
+      `Amount: ${matchedAmount.toString()} @ ${executionPrice.toString()}`
     );
 
     // Update remaining amounts
@@ -98,10 +109,10 @@ export function matchOrders(orders: PlainOrder[]): MatchedPair[] {
     sellOrder.remainingAmount -= matchedAmount;
 
     // Move to next order if current is fully filled
-    if (buyOrder.remainingAmount === 0) {
+    if (buyOrder.remainingAmount === 0n) {
       buyIdx++;
     }
-    if (sellOrder.remainingAmount === 0) {
+    if (sellOrder.remainingAmount === 0n) {
       sellIdx++;
     }
   }
@@ -118,12 +129,12 @@ export function matchOrders(orders: PlainOrder[]): MatchedPair[] {
  */
 export function validateMatch(match: MatchedPair): boolean {
   // Basic validation
-  if (match.matchedAmount <= 0) {
+  if (match.matchedAmount <= 0n) {
     console.warn('⚠️  Invalid match: matched amount must be positive');
     return false;
   }
 
-  if (match.executionPrice <= 0) {
+  if (match.executionPrice <= 0n) {
     console.warn('⚠️  Invalid match: execution price must be positive');
     return false;
   }
@@ -164,14 +175,14 @@ export function calculateMatchStats(
   feeBps: number = 30
 ) {
   const totalVolume = matches.reduce(
-    (sum, m) => sum + m.matchedAmount * m.executionPrice,
+    (sum, m) => sum + Number(m.matchedAmount) * Number(m.executionPrice),
     0
   );
 
   const totalFees = (totalVolume * feeBps) / 10000;
 
   const totalBaseVolume = matches.reduce(
-    (sum, m) => sum + m.matchedAmount,
+    (sum, m) => sum + Number(m.matchedAmount),
     0
   );
 
@@ -202,7 +213,7 @@ export function prioritizeMatches(matches: MatchedPair[]): MatchedPair[] {
     const volumeB = b.matchedAmount * b.executionPrice;
     
     if (volumeB !== volumeA) {
-      return volumeB - volumeA;
+      return volumeB > volumeA ? 1 : -1;
     }
 
     // Priority 2: Age of oldest order (ascending)
@@ -212,4 +223,3 @@ export function prioritizeMatches(matches: MatchedPair[]): MatchedPair[] {
     return oldestA - oldestB;
   });
 }
-

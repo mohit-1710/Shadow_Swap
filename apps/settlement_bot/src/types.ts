@@ -29,9 +29,9 @@ export interface PlainOrder {
   owner: PublicKey;
   orderBook: PublicKey;
   side: 0 | 1 | 'buy' | 'sell';  // 0 = buy, 1 = sell (from binary) OR 'buy'/'sell' (strings)
-  price: number;
-  amount: number;
-  remainingAmount: number;
+  price: bigint;
+  amount: bigint;
+  remainingAmount: bigint;
   escrow: PublicKey;
   createdAt: number;
   orderId: number;
@@ -54,8 +54,8 @@ export interface MatchResultInput {
 export interface MatchedPair {
   buyOrder: PlainOrder;
   sellOrder: PlainOrder;
-  matchedAmount: number;
-  executionPrice: number;
+  matchedAmount: bigint;
+  executionPrice: bigint;
 }
 
 /**
@@ -118,4 +118,3 @@ export interface ArciumDecryptResponse {
   nonce: string;
   error?: string;
 }
-
