@@ -1,148 +1,108 @@
-# ShadowSwap - Privacy-Preserving DEX on Solana
+# ShadowSwap Monorepo
 
-Privacy-first decentralized exchange built on Solana using Anchor framework. All order details are encrypted client-side before on-chain submission.
+ShadowSwap is a privacy-preserving orderbook DEX on Solana. Encrypted orders are posted on-chain, the settlement bot matches them off-chain, and a stateless Anchor program finalizes fills. This repository bundles every moving part—smart contract, Next.js frontend, keeper bot, and shared libraries—under one Yarn workspace so contributors can ship coordinated changes quickly.
 
-## Project Structure
-
+```mermaid
+graph TD
+  FE[Next.js Frontend] -->|submit_encrypted_order| AP[Anchor Program]
+  FE <-->|account fetch / events| AP
+  SB[Settlement Bot] -->|submit_match_results| AP
+  AP -->|escrow PDAs| ACC[(Token Accounts)]
+  SB -. decrypt/match .-> MPC[Arcium MPC]
 ```
-ShadowSwap_Project/
-├── apps/
-│   ├── anchor_program/       # Anchor smart contract
-│   ├── frontend/             # Next.js UI
-│   └── settlement_bot/       # Off-chain matching bot
-├── packages/
-│   └── shared_types/         # Shared TypeScript types
-└── Project_Details/          # Design documents
-```
-
-## 📋 Current Phase
-
-**Phase 4: Frontend Integration & Mock End-to-End Testing**
-
-See [plan.md](./plan.md) for the complete roadmap for integrating the frontend and performing mock E2E testing.
-
-**Current Status:**
-- ✅ Phase 1-3: Backend complete (Anchor program + Keeper bot)
-- ✅ Deployed to Devnet
-- 🚧 Phase 4: Frontend integration (in progress)
 
 ## Quick Start
 
-```bash
-# Install dependencies
+1. **Install dependencies**
+   ```bash
 yarn install
+   ```
+2. **Bootstrap devnet state** – deploy the Anchor program, create the order book, and refresh the bot config.
+   ```bash
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com \
+ANCHOR_WALLET=~/.config/solana/id.json \
+yarn anchor:setup
+   ```
+3. **Run the apps**
+   ```bash
+# Terminal 1 – frontend
+cd apps/frontend && yarn dev
 
-# Build shared types
-yarn build:shared
+# Terminal 2 – settlement bot
+cd apps/settlement_bot && yarn dev
+   ```
 
-# Build Anchor program
-yarn anchor:build
+## Environment Files
 
-# Run frontend (separate terminal)
-yarn dev:frontend
+- `env.example` – base configuration shared across tooling.
+- `apps/frontend/env.example` – RPC, program, and mint IDs for the UI.
+- `apps/settlement_bot/.env.example` – keeper runtime settings (RPC, program, Arcium, Sanctum).
 
-# Run settlement bot (separate terminal)
-yarn dev:bot
+Copy the relevant file to `.env`/`.env.local` and tweak before running any command.
+
+## Monorepo Layout
+
+| Path | Description |
+| --- | --- |
+| `apps/anchor_program` | Anchor smart contract + deployment scripts |
+| `apps/frontend` | Next.js 14 UI with wallet adaptor + encryption flow |
+| `apps/settlement_bot` | Keeper bot that decrypts, matches, and settles orders |
+| `packages/shared_types` | Shared TypeScript definitions reused by the apps |
+| `scripts` | Utility scripts (orderbook inspection, cleanup) |
+
+```mermaid
+graph LR
+  subgraph apps
+    anchor_program
+    frontend
+    settlement_bot
+  end
+  subgraph packages
+    shared_types
+  end
+  scripts --> anchor_program
+  shared_types --> frontend
+  shared_types --> settlement_bot
 ```
 
-## Development Commands
+## Development Workflows
 
-```bash
-# Build all
-yarn build:all
+### Anchor Program
+- Build: `yarn anchor:build`
+- Test (against local validator): `yarn anchor:test`
+- Deploy to devnet: `SKIP_TESTS=1 anchor deploy` (or run via `yarn anchor:setup`)
 
-# Anchor
-yarn anchor:build
-yarn anchor:test
-yarn anchor:deploy
+The program currently lives at `5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt`. Default order book PDAs (`FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8`) pair SOL (`So11111111111111111111111111111111111111112`) with Circle’s devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`).
 
-# Frontend
-yarn dev:frontend
-yarn build:frontend
+### Frontend (Next.js)
+- Dev server: `cd apps/frontend && yarn dev`
+- Production build: `yarn build && yarn start`
+- Lint: `yarn lint`
 
-# Settlement Bot
-yarn dev:bot
-yarn build:bot
+The UI handles client-side encryption, WSOL wrapping/unwrapping, balance previews, and order management.
 
-# Clean
-yarn clean
-```
+### Settlement Bot
+- Run locally: `cd apps/settlement_bot && yarn dev`
+- Compile: `yarn build`
+- Environment keys:
+  - `USE_DIRECT_RPC=true` to send transactions straight to devnet.
+  - `USE_MOCK_ARCIUM=true` if you want deterministic mock decrypts.
+  - `USE_MOCK_SANCTUM=false` to ensure matches really settle.
 
-## Implementation Status
+The bot now validates decrypted payloads, ensures token accounts exist, checks escrow funding, and skips any match that would overflow u64 or fail SPL transfers.
 
-### ✅ Phase 1 & 2: Account Structures
-- `EncryptedOrder` - Stores encrypted order data
-- `OrderBook` - Manages SOL/USDC trading pair
-- `Escrow` - Holds order funds in PDA-owned accounts
-- `CallbackAuth` - Authenticates matching engine
+## Testing & Verification
 
-### ✅ Phase 3: Instructions Implemented
-- `initialize_order_book` - Create new order book
-- `place_order` - Submit encrypted order with escrow
-- `cancel_order` - Cancel order and return funds
-- `match_orders` - Match compatible orders (keeper-only)
-- `create_callback_auth` - Authorize keeper
+| Layer | Command | Notes |
+| --- | --- | --- |
+| Anchor Program | `yarn anchor:test` | Uses Anchor’s mocha runner, mocks MPC inputs |
+| Frontend | `yarn lint` + browser flows | Hook up Phantom/Solflare on devnet |
+| Settlement Bot | `yarn dev` | Logs every matching cycle, RPC submission, and failure reason |
 
-### ✅ Phase 3.5: Comprehensive Test Suite
-- **12 test cases** covering all security vulnerabilities
-- Tests: Insufficient funds, unauthorized access, state validation
-- Simulated encrypted data (frontend/Arcium simulation)
-- 100% coverage of unhappy paths and edge cases
+## Maintainer Notes
 
-See: `apps/anchor_program/IMPLEMENTATION.md` and `apps/anchor_program/TEST_SUMMARY.md`
+- **Escrow sanity**: All buy/sell submissions now fund PDA-owned token accounts. If you see `NumericalOverflow` in logs, cancel legacy orders or rerun `yarn anchor:setup` to start with a clean order book.
+- **Rate limits**: The bot auto-retries when RPC returns HTTP 429. Adjust `MATCH_INTERVAL` if you need slower polling.
+- **Documentation**: Each major folder contains its own `README.md` describing structure, commands, and integration details.
 
-## Architecture
-
-### Anchor Program (apps/anchor_program/)
-- Core account structures implemented
-- Error codes and constants defined
-- Ready for instruction implementation
-- MPC logic directory: `arcis_logic/`
-
-### Frontend (apps/frontend/)
-- Next.js 14 with TypeScript
-- Solana Wallet Adapter integration
-- Component-based architecture
-
-### Settlement Bot (apps/settlement_bot/)
-- TypeScript bot with polling loop
-- Order monitoring and matching
-- Automated settlement execution
-
-### Shared Types (packages/shared_types/)
-- Common types across monorepo
-- Account interfaces
-- Constants and enums
-
-## Next Steps (Phase 4+)
-
-- [ ] Build settlement bot matching algorithm
-- [ ] Implement settlement transactions
-- [ ] Build frontend UI components  
-- [ ] Add comprehensive tests
-- [ ] Deploy to devnet
-
-## Privacy Features
-
-- Client-side encryption of all order details
-- Encrypted amounts and volumes
-- No plaintext data on-chain
-- MPC-based matching (planned)
-
-## Tech Stack
-
-- **Smart Contract**: Rust + Anchor 0.31.1
-- **Frontend**: Next.js 14 + React 18
-- **Bot**: Node.js + TypeScript
-- **Blockchain**: Solana
-
-## Documentation
-
-- Design documents: `Project_Details/`
-- Account structures: `apps/anchor_program/programs/shadow_swap/src/lib.rs`
-- Settlement bot: `apps/settlement_bot/README.md`
-- Shared types: `packages/shared_types/README.md`
-
-## License
-
-MIT
+Happy hacking! 🚀

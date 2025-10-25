@@ -1,162 +1,62 @@
-# ShadowSwap - Standard Anchor Program (Hybrid Architecture)
+# Anchor Program
 
-This is the refactored **standard Anchor program** for ShadowSwap, implementing the **Hybrid architecture** approach where:
+Smart contract for ShadowSwap. It manages encrypted order books, escrow PDAs, and settlement instructions.
 
-- **Encrypted order submission** happens on-chain via standard Anchor instructions
-- **Order matching** happens off-chain by an authorized keeper bot
-- **Settlement** happens on-chain via the `submit_match_results` instruction
+## Structure
 
-## Architecture Overview
+```
+apps/anchor_program/
+├── Anchor.toml          # Workspace + deployment config
+├── programs/
+│   └── shadow_swap/
+│       ├── Cargo.toml
+│       └── src/lib.rs  # Instructions + account structs
+├── scripts/             # Deployment & inspection helpers
+└── target/              # Generated artifacts (IDL, binaries)
+```
 
-### Hybrid Model
+## Key PDAs
 
-The Hybrid architecture combines the best of both worlds:
+| PDA | Seeds | Purpose |
+| --- | --- | --- |
+| `order_book` | `['order_book', baseMint, quoteMint]` | Stores trading pair config & counters |
+| `order` | `['order', orderBook, orderCount]` | Stores encrypted payload + status |
+| `escrow` | `['escrow', order]` | Owns the token account holding funds for an order |
+| `callback_auth` | `['callback_auth', orderBook, keeper]` | Authorizes a keeper bot to submit match results |
 
-1. **On-chain encrypted storage**: Orders are encrypted client-side and stored on-chain via `submit_encrypted_order`
-2. **Off-chain matching**: A keeper bot with TEE (Trusted Execution Environment) fetches encrypted orders, decrypts them in the TEE, performs matching, and generates settlement instructions
-3. **On-chain settlement**: The keeper submits match results via `submit_match_results`, which performs atomic token swaps
-
-### Key Instructions
-
-#### 1. `initialize_order_book`
-Creates a new order book for a trading pair (e.g., WSOL/USDC).
-
-**Parameters:**
-- `base_mint`: Base token mint (e.g., WSOL)
-- `quote_mint`: Quote token mint (e.g., USDC)
-- `fee_bps`: Fee in basis points (e.g., 30 = 0.3%)
-- `min_base_order_size`: Minimum order size in base token units
-
-#### 2. `submit_encrypted_order`
-Submits an encrypted order to the order book.
-
-**Parameters:**
-- `cipher_payload`: Encrypted order data (side, price, amount)
-- `encrypted_amount`: Encrypted amount field
-
-**Process:**
-1. Validates payload size
-2. Assigns sequential order ID
-3. Creates escrow account
-4. Transfers tokens to escrow
-5. Stores encrypted order on-chain
-
-#### 3. `cancel_order`
-Cancels an active order and returns escrowed funds.
-
-**Requirements:**
-- Must be called by order owner
-- Order must be active or partially filled
-
-#### 4. `create_callback_auth`
-Authorizes a keeper to submit match results.
-
-**Parameters:**
-- `expires_at`: Unix timestamp when authorization expires
-
-**Requirements:**
-- Must be called by order book authority
-
-#### 5. `submit_match_results`
-Executes settlement for a matched pair of orders.
-
-**Parameters:**
-- `match_input`: Contains buyer/seller pubkeys, matched amount, and execution price
-
-**Process:**
-1. Verifies keeper authorization
-2. Validates orders are active
-3. Calculates quote token amount (matched_amount × execution_price)
-4. Transfers quote tokens from buyer's escrow to seller
-5. Transfers base tokens from seller's escrow to buyer
-6. Updates order statuses to "Filled"
-7. Emits `TradeSettled` event
-
-### Account Structures
-
-#### `EncryptedOrder`
-Stores encrypted order data with the following fields:
-- `owner`: Order owner's public key
-- `order_book`: Associated order book
-- `cipher_payload`: Encrypted order details (up to 512 bytes)
-- `status`: Order status (Active, Partial, Filled, Cancelled)
-- `encrypted_remaining`: Encrypted remaining amount
-- `escrow`: Associated escrow account
-- `order_id`: Sequential order identifier
-
-#### `OrderBook`
-Manages orders for a trading pair:
-- `authority`: Order book manager
-- `base_mint` / `quote_mint`: Token pair
-- `order_count`: Total orders created
-- `active_orders`: Currently active orders
-- `fee_bps`: Trading fee
-- `is_active`: Whether order book is accepting orders
-
-#### `Escrow`
-Holds escrowed tokens for an order:
-- `order`: Associated order account
-- `owner`: Order owner
-- `token_account`: PDA-owned token account
-- `token_mint`: Escrowed token mint
-- `encrypted_amount`: Original encrypted deposit
-
-#### `CallbackAuth`
-Authorization for keeper operations:
-- `authority`: Authorized keeper public key
-- `order_book`: Associated order book
-- `expires_at`: Authorization expiration
-- `is_active`: Whether authorization is active
-
-## Building
+## Commands
 
 ```bash
+# Compile the program
 anchor build
-```
 
-## Testing
-
-```bash
+# Run test suite (local validator)
 anchor test
+
+# Deploy to devnet (respects Anchor.toml)
+SKIP_TESTS=1 anchor deploy
+
+# Initialize the default SOL/USDC order book + keeper auth
+ANCHOR_PROVIDER_URL=https://api.devnet.solana.com \
+ANCHOR_WALLET=~/.config/solana/id.json \
+yarn anchor:setup
 ```
 
-## Deployment
+## Environment
 
-### Devnet
-```bash
-anchor deploy --provider.cluster devnet
-```
+The following environment variables are read by the scripts:
 
-### Mainnet
-```bash
-anchor deploy --provider.cluster mainnet
-```
+| Variable | Description |
+| --- | --- |
+| `ANCHOR_PROVIDER_URL` | RPC endpoint (e.g., `https://api.devnet.solana.com`) |
+| `ANCHOR_WALLET` | Path to the deployer keypair (default `~/.config/solana/id.json`) |
+| `SHADOWSWAP_PROGRAM_ID` | Program to upgrade/deploy (defaults to `5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt`) |
 
-## Key Differences from Native MXE Attempt
+## Adding New Instructions
 
-The native MXE attempt (hidden in `../.shadow_swap_mxe_native_attempt/`) used:
-- `#[arcium_program]` macro instead of `#[program]`
-- `arcium-anchor` dependency
-- Arcium MPC callbacks for encrypted computation
-- `invoke_matching` instruction to trigger Arcium MPC
+1. Define account structs + instruction handlers in `src/lib.rs`.
+2. Re-run `anchor build` to regenerate `target/idl/shadow_swap.json`.
+3. Update `packages/shared_types` so the frontend/bot stay aligned.
+4. Extend settlement bot logic if the keeper flow changes.
 
-This standard Anchor version:
-- Uses standard `#[program]` macro
-- Removes all Arcium dependencies
-- Implements `submit_match_results` for keeper-driven settlement
-- Allows for flexible off-chain matching strategies (TEE, MPC, ZK, etc.)
-
-## Security Considerations
-
-1. **Keeper Authorization**: Only authorized keepers (via `CallbackAuth`) can submit match results
-2. **Order Validation**: Extensive validation of order states and token accounts
-3. **Escrow Safety**: All token transfers go through PDA-controlled escrow accounts
-4. **Expiration**: Keeper authorizations expire after a set time
-
-## Future Enhancements
-
-1. **Partial Fills**: Support for partially filling large orders
-2. **Fee Collection**: Implement fee collection mechanism
-3. **Multi-keeper**: Support multiple authorized keepers for redundancy
-4. **Advanced Matching**: Support for limit orders, market orders, etc.
-
+Keep migrations backwards compatible and document any PDA changes inside the root README.

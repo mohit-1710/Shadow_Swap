@@ -1,85 +1,71 @@
-# ShadowSwap Frontend
+# Frontend (Next.js)
 
-Next.js-based frontend for ShadowSwap - a privacy-preserving DEX on Solana.
+Wallet-facing UI for ShadowSwap. Built with Next.js 14 + React 18, it encrypts orders client-side, wraps/unwraps SOL, and lets users manage submissions and cancellations.
 
-## Overview
+## Features
 
-This is the user interface for ShadowSwap, allowing users to:
-- Connect their Solana wallet
-- Place encrypted orders
-- Auto-manage WSOL: wrap SOL before sells, unwrap refunds, and surface live status updates when orders fill
-- View order status
-- Cancel orders
-- Trade with privacy
+- Wallet Adapter (Phantom, Solflare, etc.)
+- Client-side order encryption (mock Arcium today)
+- Automatic WSOL wrapping + unwrapping when selling/cancelling
+- Balance panels for WSOL & USDC
+- Order dashboard with live status feed (polls every 5 seconds)
 
-## Tech Stack
+## Directory Overview
 
-- **Next.js 14** - React framework
-- **TypeScript** - Type safety
-- **@solana/web3.js** - Solana interaction
-- **@solana/wallet-adapter** - Wallet integration
-- **@coral-xyz/anchor** - Anchor program client
+```
+apps/frontend/
+├── components/        # Order form, order book, wallet widgets
+├── lib/               # Program helpers, encryption mocks, token utils
+├── pages/             # Next.js routes (/_app.tsx, index.tsx)
+├── public/
+├── styles/
+└── env.example        # UI-specific environment template
+```
 
-## Development
+## Environment
+
+Copy `env.example` to `.env.local` and adjust:
+
+| Variable | Description |
+| --- | --- |
+| `NEXT_PUBLIC_RPC_ENDPOINT` | Solana RPC endpoint |
+| `NEXT_PUBLIC_PROGRAM_ID` | Anchor program ID (default `5Lg1Bz...`) |
+| `NEXT_PUBLIC_ORDER_BOOK_PUBKEY` | PDA for the active order book |
+| `NEXT_PUBLIC_BASE_MINT` | Wrapped SOL mint (`So1111...`) |
+| `NEXT_PUBLIC_QUOTE_MINT` | Circle devnet USDC (`4zMMC9...`) |
+| `NEXT_PUBLIC_REFRESH_INTERVAL` | Auto-refresh interval for order polling |
+
+## Scripts
 
 ```bash
-# From monorepo root
-yarn dev:frontend
-
-# Or from this directory
+# Start dev server with hot reload
 yarn dev
+
+# Generate production build
+yarn build && yarn start
+
+# Lint source files
+yarn lint
 ```
 
-Visit `http://localhost:3000`
+## Data Flow
 
-## Build
-
-```bash
-# From monorepo root
-yarn build:frontend
-
-# Or from this directory
-yarn build
+```mermaid
+graph LR
+  Wallet -->|signs| OrderForm
+  OrderForm -->|encrypts + wraps SOL| RPC[Solana RPC]
+  OrderBookDisplay <-->|fetch PDAs| RPC
+  RPC -->|account updates| StatusFeed
 ```
 
-## Project Structure
+When you submit an order the form will:
+1. Validate balances (USDC for buys, SOL for sells).
+2. Create missing ATAs and wrap SOL if needed.
+3. Encrypt the payload and call `submit_encrypted_order`.
+4. Refresh balances and order feed after confirmation.
 
-```
-frontend/
-├── pages/          # Next.js pages
-├── components/     # React components
-├── styles/         # CSS/styling
-├── public/         # Static assets
-└── package.json
-```
+## Troubleshooting
 
-## Environment Variables
-
-Create `.env.local` (see `env.example` for current devnet values):
-
-```env
-NEXT_PUBLIC_SOLANA_NETWORK=devnet
-NEXT_PUBLIC_RPC_ENDPOINT=https://api.devnet.solana.com
-NEXT_PUBLIC_PROGRAM_ID=5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
-NEXT_PUBLIC_ORDER_BOOK_PUBKEY=FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8
-NEXT_PUBLIC_BASE_MINT=So11111111111111111111111111111111111111112
-NEXT_PUBLIC_QUOTE_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
-```
-
-## Features (To Be Implemented)
-
-- [ ] Wallet connection
-- [ ] Order placement with encryption
-- [ ] Order management dashboard
-- [ ] Real-time order status updates
-- [ ] Transaction history
-- [ ] Privacy-preserving UI
-
-## Dependencies
-
-- Shared types from `@shadowswap/shared-types`
-- Anchor program client from `apps/anchor_program`
-
-## License
-
-MIT
+- **`InvalidAccountData` / `insufficient funds`** – make sure the wallet holds actual SPL tokens for the configured mint, not a different devnet USDC.
+- **Nothing updates** – confirm `.env.local` points at the latest order book PDA emitted by `yarn anchor:setup`.
+- **Wallet errors** – try resetting the `NEXT_PUBLIC_REFRESH_INTERVAL` or reconnecting the wallet adapter.
