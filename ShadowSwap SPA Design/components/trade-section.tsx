@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { OrderBook } from "./order-book"
+import { PriceCharts } from "./price-charts"
 import { ArrowRightLeft } from "lucide-react"
 
 export function TradeSection() {
@@ -20,35 +20,35 @@ export function TradeSection() {
   }
 
   return (
-    <section id="trade" className="py-20 px-4 bg-black">
+    <section id="trade" className="py-12 sm:py-20 px-4 bg-black">
       <div className="max-w-7xl mx-auto">
-        <div className="text-center mb-12">
-          <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">Trade with Privacy</h2>
-          <p className="text-white/60 text-lg">Execute orders without exposing your positions to the mempool</p>
+        <div className="text-center mb-8 sm:mb-12">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">Trade with Privacy</h2>
+          <p className="text-white/60 text-base sm:text-lg">Execute orders without exposing your positions to the mempool</p>
         </div>
 
-        <div className="grid lg:grid-cols-3 gap-8">
-          {/* Trade Form */}
-          <div className="lg:col-span-1">
+        <div className="grid lg:grid-cols-3 gap-6 sm:gap-8">
+          {/* Trade Form - Mobile First (shows first on mobile) */}
+          <div className="lg:col-span-1 lg:order-2">
             <Card>
               <CardHeader>
-                <CardTitle>Place Order</CardTitle>
+                <CardTitle className="text-lg sm:text-xl">Place Order</CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 {/* Order Type Tabs */}
                 <div className="flex gap-2 bg-white/5 p-1 rounded-lg">
                   <button
                     onClick={() => setOrderType("limit")}
-                    className={`flex-1 py-2 rounded transition-all ${
-                      orderType === "limit" ? "bg-golden text-black font-medium" : "text-white/60 hover:text-white"
+                    className={`flex-1 py-2 rounded transition-all touch-manipulation ${
+                      orderType === "limit" ? "bg-purple-500 text-white font-medium glow-purple" : "text-white/60 hover:text-white active:text-white"
                     }`}
                   >
                     Limit
                   </button>
                   <button
                     onClick={() => setOrderType("market")}
-                    className={`flex-1 py-2 rounded transition-all ${
-                      orderType === "market" ? "bg-golden text-black font-medium" : "text-white/60 hover:text-white"
+                    className={`flex-1 py-2 rounded transition-all touch-manipulation ${
+                      orderType === "market" ? "bg-purple-500 text-white font-medium glow-purple" : "text-white/60 hover:text-white active:text-white"
                     }`}
                   >
                     Market
@@ -66,7 +66,7 @@ export function TradeSection() {
                       onChange={(e) => setFromAmount(e.target.value)}
                       className="flex-1"
                     />
-                    <button className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-md text-white font-medium transition-colors">
+                    <button className="px-4 py-2 bg-white/10 hover:bg-white/20 active:bg-white/30 rounded-md text-white font-medium transition-colors touch-manipulation">
                       {fromToken}
                     </button>
                   </div>
@@ -77,7 +77,7 @@ export function TradeSection() {
                 <div className="flex justify-center">
                   <button
                     onClick={handleSwap}
-                    className="p-2 bg-golden/10 hover:bg-golden/20 rounded-lg text-golden transition-colors"
+                    className="p-2 bg-purple-500/10 hover:bg-purple-500/20 active:bg-purple-500/30 rounded-lg text-purple-400 transition-colors hover:glow-purple touch-manipulation"
                   >
                     <ArrowRightLeft size={20} />
                   </button>
@@ -94,7 +94,7 @@ export function TradeSection() {
                       onChange={(e) => setToAmount(e.target.value)}
                       className="flex-1"
                     />
-                    <button className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-md text-white font-medium transition-colors">
+                    <button className="px-4 py-2 bg-white/10 hover:bg-white/20 active:bg-white/30 rounded-md text-white font-medium transition-colors touch-manipulation">
                       {toToken}
                     </button>
                   </div>
@@ -117,7 +117,7 @@ export function TradeSection() {
                   </div>
                   <div className="flex justify-between text-white/60">
                     <span>Fee</span>
-                    <span className="text-golden">0.1%</span>
+                    <span className="text-purple-400">0.1%</span>
                   </div>
                 </div>
 
@@ -129,9 +129,9 @@ export function TradeSection() {
             </Card>
           </div>
 
-          {/* Order Book */}
-          <div className="lg:col-span-2">
-            <OrderBook />
+          {/* Price Charts - Desktop Second (shows second on mobile) */}
+          <div className="lg:col-span-2 lg:order-1">
+            <PriceCharts />
           </div>
         </div>
       </div>

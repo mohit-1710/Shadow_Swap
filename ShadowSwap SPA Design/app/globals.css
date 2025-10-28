@@ -80,7 +80,10 @@
 
   /* Primary Colors */
   --color-black: #0a0a0a;
-  --color-golden: #ffd700;
+  --color-purple: #a855f7;
+  --color-purple-light: #c084fc;
+  --color-purple-dark: #7e22ce;
+  --color-fuchsia: #d946ef;
   --color-white: #ffffff;
   --color-dark-gray: #1a1a1a;
   --color-medium-gray: #2d2d2d;
@@ -89,9 +92,9 @@
   /* Semantic Tokens */
   --color-background: var(--color-black);
   --color-foreground: var(--color-white);
-  --color-primary: var(--color-golden);
+  --color-primary: var(--color-purple);
   --color-secondary: var(--color-dark-gray);
-  --color-accent: var(--color-golden);
+  --color-accent: var(--color-purple);
   --color-border: var(--color-light-gray);
   --color-muted: var(--color-medium-gray);
 
@@ -135,8 +138,20 @@
     @apply border-border outline-ring/50;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground;
+    transition: opacity 0.3s ease-in-out;
+  }
+
+  /* Smooth page transitions */
+  @media (prefers-reduced-motion: no-preference) {
+    :root {
+      view-transition-name: root;
+    }
   }
 
   h1 {
@@ -165,6 +180,20 @@
     clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
   }
 
+  .glow-purple {
+    box-shadow: 0 0 20px rgba(168, 85, 247, 0.3), 
+                0 0 40px rgba(168, 85, 247, 0.15);
+  }
+
+  .glow-purple-strong {
+    box-shadow: 0 0 25px rgba(168, 85, 247, 0.4), 
+                0 0 50px rgba(168, 85, 247, 0.2);
+  }
+
+  .text-glow-purple {
+    text-shadow: 0 0 10px rgba(168, 85, 247, 0.5);
+  }
+
   .accent-line {
     position: relative;
   }
@@ -176,7 +205,7 @@
     left: 0;
     width: 100%;
     height: 2px;
-    background: linear-gradient(90deg, var(--color-golden) 0%, transparent 100%);
+    background: linear-gradient(90deg, var(--color-purple) 0%, transparent 100%);
   }
 
   .accent-line::after {
@@ -186,7 +215,7 @@
     right: 0;
     width: 100%;
     height: 2px;
-    background: linear-gradient(90deg, transparent 0%, var(--color-golden) 100%);
+    background: linear-gradient(90deg, transparent 0%, var(--color-purple) 100%);
   }
 }
 
@@ -206,5 +235,35 @@
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-golden);
+  background: var(--color-purple);
 }
+
+/* Animated Lines for Button */
+@keyframes line-slide-right {
+  0% {
+    left: -40%;
+  }
+  100% {
+    left: 140%;
+  }
+}
+
+@keyframes line-slide-left {
+  0% {
+    right: -40%;
+  }
+  100% {
+    right: 140%;
+  }
+}
+
+.animate-line-top {
+  animation: line-slide-right 2s ease-in-out infinite;
+}
+
+.animate-line-bottom {
+  animation: line-slide-left 2s ease-in-out infinite;
+}
+
+
+

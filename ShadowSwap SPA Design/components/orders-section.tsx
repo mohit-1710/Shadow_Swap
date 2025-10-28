@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { X } from "lucide-react"
@@ -48,28 +49,29 @@ const mockOrders = [
 ]
 
 export function OrdersSection() {
+  const router = useRouter()
+
+  const handleRowClick = (orderId: string) => {
+    if (orderId === "1") {
+      router.push("/trade")
+    }
+  }
+
   return (
-    <section id="orders" className="py-20 px-4 bg-black">
+    <section id="orders" className="py-12 sm:py-20 px-4 bg-black">
       <div className="max-w-7xl mx-auto">
-        <div className="mb-12">
-          <h2 className="text-4xl md:text-5xl font-bold text-white mb-4">Your Orders</h2>
-          <p className="text-white/60 text-lg">Track and manage all your active and historical orders</p>
+        <div className="mb-8 sm:mb-12">
+          <h2 className="text-3xl sm:text-4xl md:text-5xl font-bold text-white mb-4">Liquidity Pools</h2>
+          <p className="text-white/60 text-base sm:text-lg">Track and manage all your active and historical orders</p>
         </div>
 
         <Card>
           <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Order History</CardTitle>
-              <div className="flex gap-2">
-                <button className="px-3 py-1 text-sm text-white/60 hover:text-white transition-colors">All</button>
-                <button className="px-3 py-1 text-sm text-golden border-b-2 border-golden">Open</button>
-                <button className="px-3 py-1 text-sm text-white/60 hover:text-white transition-colors">Filled</button>
-              </div>
-            </div>
+            <CardTitle className="text-lg sm:text-xl">Liquidity Pools</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="overflow-x-auto -mx-2 sm:mx-0">
+              <table className="w-full text-xs sm:text-sm min-w-[640px]">
                 <thead>
                   <tr className="border-b border-white/10">
                     <th className="text-left py-3 px-4 text-white/60 font-medium">Pair</th>
@@ -84,7 +86,15 @@ export function OrdersSection() {
                 </thead>
                 <tbody>
                   {mockOrders.map((order) => (
-                    <tr key={order.id} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+                    <tr 
+                      key={order.id}
+                      onClick={() => handleRowClick(order.id)}
+                      className={`border-b border-white/5 transition-colors ${
+                        order.id === "1" 
+                          ? "hover:bg-white/5 active:bg-white/10 cursor-pointer touch-manipulation" 
+                          : "backdrop-blur-sm opacity-60 pointer-events-none"
+                      }`}
+                    >
                       <td className="py-3 px-4 text-white font-medium">{order.pair}</td>
                       <td className="py-3 px-4">
                         <span className={order.type.includes("Buy") ? "text-green-400" : "text-red-400"}>

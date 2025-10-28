@@ -7,7 +7,7 @@
 import { PublicKey, Connection } from '@solana/web3.js';
 import { Program, AnchorProvider, BN, Idl } from '@coral-xyz/anchor';
 import * as anchor from '@coral-xyz/anchor';
-import ShadowSwapIDL from '../idl/shadow_swap.json';
+import { loadShadowSwapIdl } from './shadowSwapIdlLoader';
 
 /**
  * PDA derivation utilities matching the Anchor program
@@ -132,23 +132,19 @@ export async function fetchOrderCount(
 /**
  * Get program instance
  */
-export function getProgram(
+export async function getProgramAsync(
   connection: Connection,
   wallet: any
-): Program<Idl> {
+): Promise<Program<Idl>> {
   const provider = new AnchorProvider(
     connection,
     wallet,
     { commitment: 'confirmed' }
   );
-  
-  // Set the program ID in the IDL object
-  const idl = { ...ShadowSwapIDL } as Idl;
-  
-  return new Program(
-    idl,
-    provider
-  );
+
+  const idl = (await loadShadowSwapIdl()) as Idl;
+
+  return new Program(idl, provider);
 }
 
 /**
@@ -166,4 +162,3 @@ export const ORDER_STATUS = {
 
 export const MAX_CIPHER_PAYLOAD_SIZE = 512;
 export const MAX_ENCRYPTED_AMOUNT_SIZE = 64;
-

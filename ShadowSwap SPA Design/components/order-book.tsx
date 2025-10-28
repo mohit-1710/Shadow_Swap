@@ -79,7 +79,7 @@ export function OrderBook() {
         <div className="mt-6 pt-6 border-t border-white/10">
           <div className="flex justify-between text-sm">
             <span className="text-white/60">Spread</span>
-            <span className="text-golden font-medium">0.07% (0.10 USDC)</span>
+            <span className="text-purple-400 font-medium">0.07% (0.10 USDC)</span>
           </div>
         </div>
       </CardContent>

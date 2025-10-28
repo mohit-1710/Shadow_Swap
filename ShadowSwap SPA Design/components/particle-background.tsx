@@ -67,7 +67,7 @@ function ParticleSystem({ count = 5000 }: ParticleProps) {
 
   return (
     <Points ref={pointsRef} stride={3} frustumCulled={false}>
-      <PointMaterial transparent color="#ffd700" size={0.15} sizeAttenuation={true} />
+      <PointMaterial transparent color="#a855f7" size={0.15} sizeAttenuation={true} />
     </Points>
   )
 }
