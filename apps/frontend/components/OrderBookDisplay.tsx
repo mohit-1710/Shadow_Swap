@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { PublicKey, Transaction } from '@solana/web3.js';
-import { getProgram, ORDER_STATUS } from '../lib/program';
+import { getProgramAsync, ORDER_STATUS } from '../lib/program';
 import { createCloseAccountInstruction } from '@solana/spl-token';
 
 interface DisplayOrder {
@@ -43,7 +43,7 @@ export default function OrderBookDisplay() {
         signAllTransactions: async (txs: any[]) => txs,
       };
 
-      const program = getProgram(connection, dummyWallet);
+      const program = await getProgramAsync(connection, dummyWallet);
 
       // Fetch ONLY this user's orders (by owner)
       // Cast to any for dynamic account access (TypeScript limitation with Anchor IDL)
@@ -97,7 +97,7 @@ export default function OrderBookDisplay() {
       setCancelling(orderPubkey);
       setError('');
 
-      const program = getProgram(connection, wallet as any);
+      const program = await getProgramAsync(connection, wallet as any);
       const orderPubkeyObj = new PublicKey(orderPubkey);
       
       // Fetch order to get token details

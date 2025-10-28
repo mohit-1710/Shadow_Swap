@@ -11,7 +11,7 @@ import {
 } from '../lib/tokenUtils';
 import { deriveOrderBookPda } from '../lib/program';
 import { encryptOrderWithArcium, PlainOrder, validateOrder } from '../lib/arcium';
-import ShadowSwapIDL from '../idl/shadow_swap.json';
+import { loadShadowSwapIdl } from '../lib/shadowSwapIdlLoader';
 
 const BASE_DECIMALS = 1_000_000_000n; // SOL/WSOL (lamports)
 const QUOTE_DECIMALS = 1_000_000n; // USDC (micro units)
@@ -185,8 +185,9 @@ export default function OrderSubmissionForm({
         { commitment: 'confirmed', preflightCommitment: 'confirmed' }
       );
 
-      // Load the program
-      const program = new Program(ShadowSwapIDL as any, provider);
+      // Load the program (IDL provided via env or fetched)
+      const idl = await loadShadowSwapIdl();
+      const program = new Program(idl as any, provider);
 
       // Fetch order book account to get order count
       // Cast to any for dynamic account access (TypeScript limitation with Anchor IDL)
