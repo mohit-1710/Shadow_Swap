@@ -1,74 +1,51 @@
 "use client"
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react"
+import { createContext, useContext, ReactNode, useMemo } from "react"
+import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react"
+import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
+import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets"
+import { clusterApiUrl } from "@solana/web3.js"
+
+// Import wallet adapter styles
+import "@solana/wallet-adapter-react-ui/styles.css"
+
+const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl("devnet")
 
 interface WalletContextType {
   isWalletConnected: boolean
   walletAddress: string | null
   connectWallet: () => Promise<boolean>
   disconnectWallet: () => void
+  wallet: ReturnType<typeof useSolanaWallet> | null
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
 
-export function WalletProvider({ children }: { children: ReactNode }) {
-  const [isWalletConnected, setIsWalletConnected] = useState(false)
-  const [walletAddress, setWalletAddress] = useState<string | null>(null)
-
-  // Check if wallet is already connected on mount
-  useEffect(() => {
-    const checkWalletConnection = async () => {
-      if (typeof window !== "undefined") {
-        const solana = (window as any).solana
-        if (solana?.isPhantom && solana.isConnected) {
-          try {
-            const response = await solana.connect({ onlyIfTrusted: true })
-            setWalletAddress(response.publicKey.toString())
-            setIsWalletConnected(true)
-          } catch (error) {
-            // Wallet not connected yet
-            console.log("Wallet not connected")
-          }
-        }
-      }
-    }
-    checkWalletConnection()
-  }, [])
+/**
+ * Inner provider that uses the Solana wallet adapter
+ */
+function WalletContextProvider({ children }: { children: ReactNode }) {
+  const wallet = useSolanaWallet()
+  const { connected, publicKey, disconnect, select, wallets } = wallet
 
   const connectWallet = async (): Promise<boolean> => {
     try {
-      if (typeof window === "undefined") {
-        return false
-      }
-
-      const solana = (window as any).solana
-
-      // Check if Phantom wallet is installed
-      if (!solana) {
-        window.open("https://phantom.app/", "_blank")
-        return false
-      }
-
-      // Try Phantom first
-      if (solana.isPhantom) {
-        const response = await solana.connect()
-        const address = response.publicKey.toString()
-        setWalletAddress(address)
-        setIsWalletConnected(true)
+      // If not connected, try to select and connect
+      if (!connected && wallets.length > 0) {
+        // Try Phantom first
+        const phantomWallet = wallets.find(w => w.adapter.name === 'Phantom')
+        if (phantomWallet) {
+          select(phantomWallet.adapter.name)
+          await phantomWallet.adapter.connect()
+          return true
+        }
+        
+        // Fallback to first available wallet
+        select(wallets[0].adapter.name)
+        await wallets[0].adapter.connect()
         return true
       }
-
-      // Try Solflare if Phantom not available
-      const solflare = (window as any).solflare
-      if (solflare?.isSolflare) {
-        await solflare.connect()
-        const address = solflare.publicKey.toString()
-        setWalletAddress(address)
-        setIsWalletConnected(true)
-        return true
-      }
-
-      return false
+      return connected
     } catch (error) {
       console.error("Error connecting wallet:", error)
       return false
@@ -76,31 +53,44 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   }
 
   const disconnectWallet = () => {
-    if (typeof window !== "undefined") {
-      const solana = (window as any).solana
-      if (solana?.disconnect) {
-        solana.disconnect()
-      }
-      const solflare = (window as any).solflare
-      if (solflare?.disconnect) {
-        solflare.disconnect()
-      }
-    }
-    setIsWalletConnected(false)
-    setWalletAddress(null)
+    disconnect()
   }
 
   return (
     <WalletContext.Provider
       value={{
-        isWalletConnected,
-        walletAddress,
+        isWalletConnected: connected,
+        walletAddress: publicKey?.toString() || null,
         connectWallet,
         disconnectWallet,
+        wallet,
       }}
     >
       {children}
     </WalletContext.Provider>
+  )
+}
+
+/**
+ * Main wallet provider that wraps Solana wallet adapter
+ */
+export function WalletProvider({ children }: { children: ReactNode }) {
+  const wallets = useMemo(
+    () => [
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter(),
+    ],
+    []
+  )
+
+  return (
+    <ConnectionProvider endpoint={RPC_URL}>
+      <SolanaWalletProvider wallets={wallets} autoConnect>
+        <WalletModalProvider>
+          <WalletContextProvider>{children}</WalletContextProvider>
+        </WalletModalProvider>
+      </SolanaWalletProvider>
+    </ConnectionProvider>
   )
 }
 
@@ -111,4 +101,3 @@ export function useWallet() {
   }
   return context
 }
-
