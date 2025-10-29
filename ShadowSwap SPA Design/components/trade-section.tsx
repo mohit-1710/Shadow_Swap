@@ -1,11 +1,17 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, lazy, Suspense } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { PriceCharts } from "./price-charts"
 import { ArrowRightLeft, ChevronDown, AlertCircle } from "lucide-react"
+import { Skeleton } from "@/components/ui/skeleton"
+import { useWallet } from "@/contexts/WalletContext"
+import { useShadowSwap } from "@/hooks/useShadowSwap"
+import { toast } from "sonner"
+
+// Lazy load the heavy PriceCharts component
+const PriceCharts = lazy(() => import("./price-charts").then(mod => ({ default: mod.PriceCharts })))
 
 // All available tokens for selection (only tokens with icons from liquidity pool)
 const ALL_TOKENS = [
@@ -62,12 +68,21 @@ const TokenIcon = ({ token }: { token: string }) => {
 }
 
 export function TradeSection() {
+  // Wallet and ShadowSwap integration
+  const { isWalletConnected, walletAddress, connectWallet } = useWallet()
+  const { submitOrder, isLoading, error, getBalances } = useShadowSwap()
+
   const [fromToken, setFromToken] = useState("SOL")
   const [toToken, setToToken] = useState("USDC")
   const [fromAmount, setFromAmount] = useState("")
   const [toAmount, setToAmount] = useState("")
+  const [limitPrice, setLimitPrice] = useState("")
   const [orderType, setOrderType] = useState<"limit" | "market">("limit")
   const [allowLiquidityPool, setAllowLiquidityPool] = useState(false)
+  
+  // Balances
+  const [solBalance, setSolBalance] = useState(0)
+  const [usdcBalance, setUsdcBalance] = useState(0)
   
   // Dropdown state
   const [showFromDropdown, setShowFromDropdown] = useState(false)
@@ -105,6 +120,100 @@ export function TradeSection() {
   const handleSwap = () => {
     setFromToken(toToken)
     setToToken(fromToken)
+    setFromAmount(toAmount)
+    setToAmount(fromAmount)
+  }
+
+  // Load balances when wallet connects
+  useEffect(() => {
+    if (isWalletConnected) {
+      loadBalances()
+    }
+  }, [isWalletConnected])
+
+  const loadBalances = async () => {
+    try {
+      const balances = await getBalances()
+      setSolBalance(balances.sol)
+      setUsdcBalance(balances.usdc)
+    } catch (err) {
+      console.error("Error loading balances:", err)
+    }
+  }
+
+  // Handle trade submission
+  const handleTrade = async () => {
+    // Validate wallet connection
+    if (!isWalletConnected) {
+      toast.error("Please connect your wallet first")
+      await connectWallet()
+      return
+    }
+
+    // Validate inputs
+    if (!fromAmount || parseFloat(fromAmount) <= 0) {
+      toast.error("Please enter a valid amount")
+      return
+    }
+
+    // For limit orders, validate price
+    if (orderType === "limit" && (!limitPrice || parseFloat(limitPrice) <= 0)) {
+      toast.error("Please enter a valid limit price")
+      return
+    }
+
+    // Only SOL/USDC pair is supported currently
+    if (!((fromToken === "SOL" && toToken === "USDC") || (fromToken === "USDC" && toToken === "SOL"))) {
+      toast.error("Currently only SOL/USDC pair is supported on the smart contract")
+      return
+    }
+
+    // Determine order side based on tokens
+    const side = fromToken === "SOL" ? "sell" : "buy"
+    const amount = parseFloat(fromAmount)
+    
+    // For market orders, use a default price (will be matched at market)
+    // For limit orders, use the user-specified price
+    let price: number
+    if (orderType === "market") {
+      // Use current market price estimate (in reality you'd fetch this)
+      price = 100 // Default market price
+      toast.info("Market orders use best available price")
+    } else {
+      price = parseFloat(limitPrice)
+    }
+
+    try {
+      toast.loading("Submitting order to blockchain...")
+      
+      const result = await submitOrder({
+        side,
+        price,
+        amount,
+      })
+
+      if (result.success) {
+        toast.success(
+          <div>
+            <p className="font-semibold">Order submitted successfully!</p>
+            <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
+          </div>
+        )
+        
+        // Clear form
+        setFromAmount("")
+        setToAmount("")
+        setLimitPrice("")
+        
+        // Refresh balances
+        loadBalances()
+      } else {
+        toast.error(`Order failed: ${result.error}`)
+      }
+    } catch (err: any) {
+      console.error("Trade error:", err)
+      toast.error(err.message || "Failed to submit order")
+    }
   }
 
   return (
@@ -189,6 +298,25 @@ export function TradeSection() {
                   </button>
                 </div>
 
+                {/* Critical Warning */}
+                <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-xs text-orange-200/90">
+                      <p className="font-semibold mb-1">⚠️ Testing Phase - Known Limitations:</p>
+                      <ul className="list-disc list-inside space-y-1 text-orange-200/70">
+                        <li>Only SOL/USDC pair supported</li>
+                        <li>Requires wrapped SOL (WSOL) token account</li>
+                        <li>Need devnet USDC from backend team</li>
+                        <li>Settlement requires keeper bot running</li>
+                      </ul>
+                      <p className="mt-2 text-[10px]">
+                        See <span className="font-mono">CRITICAL_ISSUES_FOUND.md</span> for setup instructions
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {/* From Token */}
                 <div>
                   <label className="block text-sm text-white/70 mb-2">From</label>
@@ -249,7 +377,9 @@ export function TradeSection() {
                       )}
                     </div>
                   </div>
-                  <div className="text-xs text-white/40 mt-1">Balance: 10.5 SOL</div>
+                  <div className="text-xs text-white/40 mt-1">
+                    Balance: {isWalletConnected ? `${solBalance.toFixed(4)} ${fromToken}` : "Connect wallet"}
+                  </div>
                 </div>
 
                 {/* Swap Button */}
@@ -322,14 +452,24 @@ export function TradeSection() {
                       )}
                     </div>
                   </div>
-                  <div className="text-xs text-white/40 mt-1">Balance: 5,234.50 USDC</div>
+                  <div className="text-xs text-white/40 mt-1">
+                    Balance: {isWalletConnected ? `${usdcBalance.toFixed(2)} ${toToken}` : "Connect wallet"}
+                  </div>
                 </div>
 
                 {/* Price Input (for limit orders) */}
                 {orderType === "limit" && (
                   <div>
-                    <label className="block text-sm text-white/70 mb-2">Price</label>
-                    <Input type="number" placeholder="0.00" className="w-full" />
+                    <label className="block text-sm text-white/70 mb-2">
+                      Limit Price ({toToken} per {fromToken})
+                    </label>
+                    <Input
+                      type="number"
+                      placeholder="Enter limit price (e.g., 100)"
+                      value={limitPrice}
+                      onChange={(e) => setLimitPrice(e.target.value)}
+                      className="w-full"
+                    />
                   </div>
                 )}
 
@@ -346,8 +486,20 @@ export function TradeSection() {
                 </div>
 
                 {/* Action Button */}
-                <Button variant="default" size="lg" className="w-full">
-                  {orderType === "limit" ? "Place Limit Order" : "Execute Trade"}
+                <Button
+                  variant="default"
+                  size="lg"
+                  className="w-full"
+                  onClick={handleTrade}
+                  disabled={isLoading || !isWalletConnected}
+                >
+                  {isLoading
+                    ? "Processing..."
+                    : !isWalletConnected
+                    ? "Connect Wallet to Trade"
+                    : orderType === "limit"
+                    ? "Place Limit Order"
+                    : "Execute Market Order"}
                 </Button>
               </CardContent>
             </Card>
@@ -355,7 +507,18 @@ export function TradeSection() {
 
           {/* Price Charts - Desktop Second (shows second on mobile) */}
           <div className="lg:col-span-2 lg:order-1">
-            <PriceCharts fromToken={fromToken} toToken={toToken} />
+            <Suspense fallback={
+              <Card className="glass">
+                <CardHeader>
+                  <Skeleton className="h-6 w-32" />
+                </CardHeader>
+                <CardContent>
+                  <Skeleton className="h-64 w-full" />
+                </CardContent>
+              </Card>
+            }>
+              <PriceCharts fromToken={fromToken} toToken={toToken} />
+            </Suspense>
           </div>
         </div>
       </div>

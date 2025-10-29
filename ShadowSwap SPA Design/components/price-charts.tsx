@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect, useCallback, useRef } from "react"
+import { useState, useMemo, useEffect, useCallback, useRef, memo } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { 
   LineChart, 
@@ -300,7 +300,7 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 // NEW LIVE PRICE CHARTS COMPONENT
 // ============================================================
 
-export function PriceCharts({ fromToken, toToken }: PriceChartsProps) {
+export const PriceCharts = memo(function PriceCharts({ fromToken, toToken }: PriceChartsProps) {
   const [viewType, setViewType] = useState<ViewType>("line")
   const [timeRange, setTimeRange] = useState<TimeRange>("1W")
   const [priceData, setPriceData] = useState<CoinGeckoPricePoint[]>([])
@@ -653,4 +653,4 @@ export function PriceCharts({ fromToken, toToken }: PriceChartsProps) {
       </CardContent>
     </Card>
   )
-}
+})

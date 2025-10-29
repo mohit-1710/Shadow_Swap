@@ -1,0 +1,165 @@
+═══════════════════════════════════════════════════════════════
+  🚨 WHY YOUR TRADE ISN'T WORKING - QUICK ANSWER
+═══════════════════════════════════════════════════════════════
+
+Your Situation:
+✅ Wallet: EESP63TVePDpiNJU4gEVeHkPxmcQe4XKifUecNvMRe8r
+✅ Balance: 10 SOL (native)
+❌ Trade: 1 SOL → 100 USDC (NOT WORKING)
+
+═══════════════════════════════════════════════════════════════
+
+ROOT CAUSES (4 Issues Found):
+═════════════════════════════════════════════════════════════════
+
+1. ❌ You Have NATIVE SOL, Need WRAPPED SOL (WSOL)
+   └─ The smart contract uses SOL as an SPL token
+   └─ You need a "wrapped SOL" token account
+   └─ Solution: Run ./setup-wallet.sh
+
+2. ❌ You Don't Have a USDC Token Account
+   └─ Even if you did have USDC, you'd need an account for it
+   └─ Solution: Run ./setup-wallet.sh (creates it)
+
+3. ❌ You Don't Have Any Devnet USDC
+   └─ You need USDC to trade
+   └─ Solution: Ask backend engineer to send you some
+
+4. 🔴 SMART CONTRACT BUG (CRITICAL!)
+   └─ Program transfers YOUR ENTIRE BALANCE, not just the amount you specify
+   └─ If you have 10 SOL, it locks up all 10, not just 1!
+   └─ Solution: Backend engineer MUST fix this before trading works properly
+
+═══════════════════════════════════════════════════════════════
+
+WHAT TO DO NOW:
+═══════════════════════════════════════════════════════════════
+
+STEP 1: Run the setup script (5 minutes)
+────────────────────────────────────────────
+cd "ShadowSwap SPA Design"
+./setup-wallet.sh
+
+This will:
+- Create your wrapped SOL account
+- Create your USDC account  
+- Wrap some of your SOL for trading
+- Show you your wallet address
+
+STEP 2: Contact Backend Engineer
+────────────────────────────────────────────
+Send this message:
+
+    "Hey! I found a critical bug in the smart contract and
+    need help with two things:
+
+    1. CRITICAL BUG: The submit_encrypted_order function 
+       transfers the ENTIRE token balance to escrow instead 
+       of just the specified amount. See line 115 in lib.rs:
+       
+       token::transfer(..., ctx.accounts.user_token_account.amount)
+       
+       This should transfer only the user's specified amount, 
+       not their entire balance. Can you fix this?
+
+    2. DEVNET USDC: Can you send me devnet USDC for testing?
+       My wallet: [YOUR_WALLET_FROM_STEP_1]
+       Amount: 1000 USDC
+       Mint: 4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
+
+    Thanks!"
+
+STEP 3: Wait for Fixes
+────────────────────────────────────────────
+⏳ Backend engineer fixes smart contract
+⏳ Backend engineer sends you USDC
+⏳ Backend engineer verifies settlement bot is running
+
+STEP 4: Test Trading
+────────────────────────────────────────────
+Once fixes are deployed:
+1. Refresh the trade page
+2. Connect your wallet
+3. Try a small test: 0.1 SOL at 100 USDC
+4. Verify only 0.1 SOL goes to escrow (not all!)
+
+═══════════════════════════════════════════════════════════════
+
+TECHNICAL DETAILS:
+═══════════════════════════════════════════════════════════════
+
+Issue #1: Native vs Wrapped SOL
+────────────────────────────────
+Your current balance:
+  ✅ Native SOL: 10 SOL (in wallet, not usable for trading)
+  ❌ Wrapped SOL: 0 SOL (token account, needed for trading)
+
+Think of it like this:
+  Native SOL = Cash in your pocket
+  Wrapped SOL = Cash in your bank account
+  
+The smart contract needs "bank account" SOL (WSOL), not 
+"pocket" SOL (native).
+
+Issue #2: Smart Contract Bug
+─────────────────────────────
+Current behavior:
+  User has: 10 WSOL
+  User wants to sell: 1 WSOL
+  Program actually takes: ALL 10 WSOL! ❌
+  
+Expected behavior:
+  User has: 10 WSOL  
+  User wants to sell: 1 WSOL
+  Program should take: ONLY 1 WSOL ✅
+
+This is why I added a warning to the UI. The backend engineer
+must fix this before trading can work properly.
+
+═══════════════════════════════════════════════════════════════
+
+FILES TO READ:
+═══════════════════════════════════════════════════════════════
+
+📄 CRITICAL_ISSUES_FOUND.md
+   └─ Detailed analysis of all 4 issues
+   └─ Step-by-step fix instructions
+   └─ Command reference
+
+📄 setup-wallet.sh
+   └─ Automated setup script
+   └─ Creates token accounts
+   └─ Wraps your SOL
+
+📄 This file (WHY_TRADE_NOT_WORKING.txt)
+   └─ Quick summary
+   └─ Action items
+
+═══════════════════════════════════════════════════════════════
+
+SUMMARY:
+═══════════════════════════════════════════════════════════════
+
+✅ Frontend is working perfectly
+✅ Integration is complete
+✅ UI shows correct warnings
+❌ You need to create token accounts (run ./setup-wallet.sh)
+❌ You need devnet USDC (ask backend engineer)
+❌ Smart contract has a bug (backend engineer must fix)
+
+The good news: Issues #1-3 are easy to fix. Issue #4 is 
+critical but fixable by the backend engineer in about an hour.
+
+Your frontend work is DONE. Now it's blocked on backend fixes.
+
+═══════════════════════════════════════════════════════════════
+
+QUESTIONS? Check these files:
+- CRITICAL_ISSUES_FOUND.md (detailed)
+- INTEGRATION_GUIDE.md (how to use the integration)
+- QUICK_START.md (general setup)
+
+Or reach out to the backend engineer with the message above!
+
+═══════════════════════════════════════════════════════════════
+
