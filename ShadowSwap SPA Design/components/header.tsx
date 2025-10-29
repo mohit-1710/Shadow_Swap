@@ -14,10 +14,15 @@ export function Header() {
   const pathname = usePathname()
   const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
 
-  const navItems = [
-    { label: "Trade", href: "#trade" },
-    { label: "Orders", href: "#orders" },
-  ]
+  // Old: Had Trade, Orders, and Docs navigation - keeping for reference
+  // const navItems = [
+  //   { label: "Trade", href: "#trade" },
+  //   { label: "Orders", href: "#orders" },
+  //   { label: "Docs", href: "/docs" },
+  // ]
+  
+  // Updated: Removed all nav items per user request
+  const navItems: { label: string; href: string }[] = []
 
   const isOnTradePage = pathname === "/trade"
 
@@ -55,7 +60,7 @@ export function Header() {
   }
 
   return (
-    <header className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-white/5 pt-6">
+    <header className="sticky top-0 z-50 bg-black/80 backdrop-blur-md pt-6">
       <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
         {/* Logo */}
         <div className="flex items-center gap-2">
@@ -63,8 +68,32 @@ export function Header() {
             ShadowSwap
           </Link>
         </div>
-        {/* Desktop Buttons */}
-        <div className="hidden md:flex items-center gap-3">
+        {/* Desktop Navigation & Buttons */}
+        <div className="hidden md:flex items-center gap-6">
+          {/* Desktop Nav Links */}
+          <nav className="flex items-center gap-6">
+            {navItems.map((item) => (
+              item.href.startsWith('#') ? (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 text-sm font-medium"
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 text-sm font-medium"
+                >
+                  {item.label}
+                </Link>
+              )
+            ))}
+          </nav>
+          
+          {/* Connect Wallet Button */}
           <div className="relative overflow-hidden">
             <Button variant="default" size="sm" onClick={handleWalletClick} className="cursor-pointer hover:scale-105 transition-transform">
               {getButtonText()}
@@ -94,14 +123,25 @@ export function Header() {
         <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md">
           <nav className="flex flex-col gap-4 p-4">
             {navItems.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
-                onClick={() => setIsOpen(false)}
-              >
-                {item.label}
-              </a>
+              item.href.startsWith('#') ? (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
+                  onClick={() => setIsOpen(false)}
+                >
+                  {item.label}
+                </a>
+              ) : (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
+                  onClick={() => setIsOpen(false)}
+                >
+                  {item.label}
+                </Link>
+              )
             ))}
             <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
               <div className="relative overflow-hidden">

@@ -3,6 +3,7 @@
 import { useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { TradeSection } from "@/components/trade-section"
+import { OrderHistory } from "@/components/order-history"
 import { useWallet } from "@/contexts/WalletContext"
 import { toast } from "sonner"
 
@@ -26,6 +27,11 @@ export default function TradePage() {
   return (
     <main className="min-h-screen bg-background">
       <TradeSection />
+      
+      {/* Order History below Trade Section */}
+      <section className="py-6 px-4 max-w-7xl mx-auto">
+        <OrderHistory />
+      </section>
     </main>
   )
 }
