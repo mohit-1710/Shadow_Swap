@@ -329,6 +329,7 @@ class ShadowSwapKeeper {
     console.log(`\n📤 Submitting ${matches.length} matches for settlement...`);
 
     const transactions: Transaction[] = [];
+    const builtMatches: MatchedPair[] = [];
 
     // Build transactions for each match
     for (const match of matches) {
@@ -344,6 +345,7 @@ class ShadowSwapKeeper {
       try {
         const tx = await this.buildSettlementTransaction(match);
         transactions.push(tx);
+        builtMatches.push(match);
       } catch (error) {
         this.logError(`Error building transaction for match`, error);
       }
@@ -363,6 +365,24 @@ class ShadowSwapKeeper {
     // Log results
     const successful = results.filter(r => r.signature).length;
     const failed = results.filter(r => r.error).length;
+
+    results.forEach((result, index) => {
+      const match = builtMatches[index];
+      if (result.signature) {
+        const buyOrderId = match?.buyOrder.orderId ?? 'unknown';
+        const sellOrderId = match?.sellOrder.orderId ?? 'unknown';
+        console.log(
+          `   🎉 Completed: buy order ${buyOrderId} ↔ sell order ${sellOrderId} at ` +
+            `${match?.executionPrice ?? 'N/A'} (tx ${result.signature})`
+        );
+      } else if (result.error) {
+        const buyOrderId = match?.buyOrder.orderId ?? 'unknown';
+        const sellOrderId = match?.sellOrder.orderId ?? 'unknown';
+        console.log(
+          `   ❌ Failed: buy order ${buyOrderId} ↔ sell order ${sellOrderId} :: ${result.error}`
+        );
+      }
+    });
 
     console.log(`\n📊 Settlement Results:`);
     console.log(`   ✅ Successful: ${successful}`);
@@ -567,17 +587,93 @@ class ShadowSwapKeeper {
   }
 
   private loadProgram(): Program<Idl> {
-    // Load IDL from anchor_program
-    const idlPath = path.join(
-      __dirname,
-      '../../anchor_program/target/idl/shadow_swap.json'
+    const idlPath = this.resolveIdlPath();
+
+    let idl: Idl;
+    try {
+      idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : 'unknown read error';
+      throw new Error(
+        `Failed to read ShadowSwap IDL at ${idlPath}: ${reason}`
+      );
+    }
+
+    const configuredProgramId = this.config.programId?.trim();
+    const idlWithAddress = idl as Idl & {
+      address?: string;
+      metadata?: { address?: string; [key: string]: any };
+    };
+    const idlAddresses = [
+      idlWithAddress.address,
+      idlWithAddress.metadata?.address,
+    ].filter((value): value is string => Boolean(value));
+
+    if (!configuredProgramId && idlAddresses.length === 0) {
+      throw new Error(
+        'No program ID configured. Set PROGRAM_ID in the environment or ensure the IDL contains an address.'
+      );
+    }
+
+    const programId = new PublicKey(
+      configuredProgramId || (idlAddresses[0] as string)
+    ).toBase58();
+
+    if (
+      idlAddresses.length > 0 &&
+      !idlAddresses.every((address) => address === programId)
+    ) {
+      throw new Error(
+        `Program ID mismatch. Config reports ${configuredProgramId}, but IDL contains ${idlAddresses.join(
+          ', '
+        )}.`
+      );
+    }
+
+    idlWithAddress.address = programId;
+    idlWithAddress.metadata = {
+      ...(idlWithAddress.metadata ?? {}),
+      address: programId,
+    };
+
+    return new Program(idlWithAddress, this.provider);
+  }
+
+  private resolveIdlPath(): string {
+    const repoRoot = path.resolve(__dirname, '../../..');
+    const candidatePaths = Array.from(
+      new Set(
+        [
+          this.config.idlPath,
+          process.env.SHADOW_SWAP_IDL_PATH,
+          process.env.IDL_PATH,
+          path.resolve(__dirname, '../../anchor_program/target/idl/shadow_swap.json'),
+          path.join(repoRoot, 'apps/anchor_program/target/idl/shadow_swap.json'),
+          path.join(process.cwd(), '../anchor_program/target/idl/shadow_swap.json'),
+        ].filter((value): value is string => Boolean(value))
+      )
     );
-    
-    const idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
-    
-    return new Program(
-      idl,
-      this.provider
+
+    const checked: string[] = [];
+
+    for (const candidate of candidatePaths) {
+      const resolved = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(candidate);
+      checked.push(resolved);
+
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    }
+
+    throw new Error(
+      [
+        'ShadowSwap IDL not found.',
+        'Run "yarn anchor:build" to generate the IDL or set SHADOW_SWAP_IDL_PATH to an existing shadow_swap.json.',
+        `Checked paths: ${checked.join(', ') || 'none'}`,
+      ].join(' ')
     );
   }
 
@@ -617,22 +713,68 @@ class ShadowSwapKeeper {
 
   private createSanctumClient(): SanctumClient {
     const useMock = process.env.USE_MOCK_SANCTUM === 'true';
-    const useDirect = process.env.USE_DIRECT_RPC !== 'false'; // Default to true for testing
-    
-    const config = {
+    const sanctumConfig = {
       gatewayUrl: this.config.sanctumGatewayUrl,
       apiKey: this.config.sanctumApiKey,
     };
 
     if (useMock) {
-      return new MockSanctumClient(config);
-    } else if (useDirect) {
-      console.log('🚀 Using Direct RPC submission (no MEV protection)');
-      return new DirectRPCClient(config, this.connection);
-    } else {
-      console.log('🔒 Using Sanctum Gateway (MEV protected)');
-      return new SanctumClient(config);
+      return new MockSanctumClient(sanctumConfig);
     }
+
+    // Devnet builds send directly to public RPC; mainnet switches to Sanctum's private gateway.
+    const shouldUseGateway = this.shouldUseSanctumGateway();
+
+    if (!shouldUseGateway) {
+      const directRpcUrls = this.getDirectRpcUrls();
+      const primaryRpcUrl = directRpcUrls[0] ?? this.config.rpcUrl;
+
+      console.log('🚀 Using direct RPC submission for development (no MEV protection)');
+      console.log(`   Primary RPC endpoint: ${primaryRpcUrl}`);
+      if (directRpcUrls.length > 1) {
+        console.log(`   Fallback RPC endpoints: ${directRpcUrls.slice(1).join(', ')}`);
+      }
+
+      const directConnection = this.buildDirectRpcConnection(primaryRpcUrl);
+      return new DirectRPCClient(sanctumConfig, directConnection);
+    }
+
+    console.log('🔒 Using Sanctum Gateway (private-only MEV protection enabled)');
+    return new SanctumClient(sanctumConfig);
+  }
+
+  private buildDirectRpcConnection(endpoint: string): Connection {
+    if (endpoint === this.config.rpcUrl) {
+      return this.connection;
+    }
+
+    return new Connection(endpoint, {
+      commitment: 'confirmed',
+      wsEndpoint: this.config.wssUrl,
+    });
+  }
+
+  private shouldUseSanctumGateway(): boolean {
+    const explicitGateway = process.env.USE_SANCTUM_GATEWAY;
+    if (explicitGateway === 'true') return true;
+    if (explicitGateway === 'false') return false;
+
+    const explicitDirect = process.env.USE_DIRECT_RPC;
+    if (explicitDirect === 'true') return false;
+    if (explicitDirect === 'false') return true;
+
+    const normalizedRpc = this.config.rpcUrl.toLowerCase();
+    const isMainnet =
+      normalizedRpc.includes('mainnet') &&
+      !normalizedRpc.includes('devnet') &&
+      !normalizedRpc.includes('testnet');
+
+    return isMainnet;
+  }
+
+  private getDirectRpcUrls(): string[] {
+    const configured = this.config.sanctumDirectRpcUrls ?? [];
+    return configured.filter(url => url.trim().length > 0);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -677,17 +819,51 @@ class ShadowSwapKeeper {
  */
 async function main() {
   // Load configuration from environment
+  const defaultRpcUrl =
+    process.env.RPC_URL ||
+    'https://solana-devnet.g.alchemy.com/v2/adhb_t3nkZM8basT45GGA';
+
+  const parseCsv = (value?: string): string[] =>
+    value
+      ? value
+          .split(',')
+          .map(entry => entry.trim())
+          .filter(Boolean)
+      : [];
+
+  const normalizedRpcUrl = defaultRpcUrl.toLowerCase();
+  const isLikelyMainnet =
+    normalizedRpcUrl.includes('mainnet') &&
+    !normalizedRpcUrl.includes('devnet') &&
+    !normalizedRpcUrl.includes('testnet');
+
+  // Development defaults stick to public devnet RPCs; mainnet flips over to Sanctum's private gateway.
+  const devnetDirectRpcDefaults = [
+    'https://solana-devnet.g.alchemy.com/v2/adhb_t3nkZM8basT45GGA',
+    'https://devnet.helius-rpc.com/?api-key=f5dc6516-fe72-497f-9c75-1aa3a8d6928b',
+  ];
+
+  const directRpcUrlsFromEnv = parseCsv(process.env.SANCTUM_DIRECT_RPC_URLS);
+  const sanctumDirectRpcUrls =
+    directRpcUrlsFromEnv.length > 0
+      ? directRpcUrlsFromEnv
+      : isLikelyMainnet
+        ? []
+        : devnetDirectRpcDefaults;
+
   const config: KeeperConfig = {
-    rpcUrl: process.env.RPC_URL || 'https://api.devnet.solana.com',
+    rpcUrl: defaultRpcUrl,
     wssUrl: process.env.WSS_URL,
     programId: process.env.PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt',
     orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8',
+    idlPath: process.env.SHADOW_SWAP_IDL_PATH || process.env.IDL_PATH,
     keeperKeypairPath: process.env.KEEPER_KEYPAIR_PATH || '~/.config/solana/id.json',
     arciumMpcUrl: process.env.ARCIUM_MPC_URL || 'https://mpc.arcium.com',
     arciumClientId: process.env.ARCIUM_CLIENT_ID || '',
     arciumClientSecret: process.env.ARCIUM_CLIENT_SECRET || '',
     sanctumGatewayUrl: process.env.SANCTUM_GATEWAY_URL || 'https://gateway.sanctum.so',
     sanctumApiKey: process.env.SANCTUM_API_KEY || '',
+    sanctumDirectRpcUrls: sanctumDirectRpcUrls.length > 0 ? sanctumDirectRpcUrls : undefined,
     matchInterval: parseInt(process.env.MATCH_INTERVAL || '10000'),
     maxRetries: parseInt(process.env.MAX_RETRIES || '3'),
     retryDelayMs: parseInt(process.env.RETRY_DELAY_MS || '1000'),

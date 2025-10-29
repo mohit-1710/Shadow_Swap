@@ -80,6 +80,8 @@ export interface KeeperConfig {
   // Program
   programId: string;
   orderBookPubkey: string;
+  idlPath?: string;
+  sanctumDirectRpcUrls?: string[];
   
   // Keeper credentials
   keeperKeypairPath: string;
