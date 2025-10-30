@@ -4,7 +4,13 @@
 
 import { Connection, PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
 import { AnchorProvider, BN, Program, Idl } from '@coral-xyz/anchor';
-import { TOKEN_PROGRAM_ID, createSyncNativeInstruction } from '@solana/spl-token';
+import { 
+  TOKEN_PROGRAM_ID, 
+  createSyncNativeInstruction, 
+  createCloseAccountInstruction,
+  NATIVE_MINT,
+  AccountLayout,
+} from '@solana/spl-token';
 import {
   deriveOrderPda,
   deriveEscrowPda,
@@ -28,6 +34,7 @@ export interface OrderParams {
   side: 'buy' | 'sell';
   amount: number; // in whole tokens (SOL or USDC)
   price: number; // in USDC per SOL
+  expiresAt?: number; // Unix timestamp (seconds), 0 or undefined = never expires
 }
 
 export interface OrderData {
@@ -118,11 +125,14 @@ export class ShadowSwapClient {
       // Encrypt order
       const encryptedOrder = await encryptOrderWithArcium(plainOrder, this.orderBook);
 
-      // Get order count
-      const orderCount = await fetchOrderCount(this.connection, this.orderBook);
+      // Get order count - pass program instance for proper deserialization
+      const orderCount = await fetchOrderCount(this.connection, this.orderBook, this.program);
+
+      console.log('Current order count:', orderCount.toString());
 
       // Derive PDAs
       const [orderPda] = deriveOrderPda(this.orderBook, orderCount, this.programId);
+      console.log('Derived order PDA:', orderPda.toString());
       const [escrowPda] = deriveEscrowPda(orderPda, this.programId);
       const [escrowTokenPda] = deriveEscrowTokenAccountPda(orderPda, this.programId);
 
@@ -156,16 +166,21 @@ export class ShadowSwapClient {
       }
 
       // Prepare cipher payload and encrypted amount buffers
-      const cipherPayloadBuffer = new Uint8Array(512);
-      cipherPayloadBuffer.set(encryptedOrder.cipherPayload.slice(0, 512));
+      // Convert Uint8Array to Buffer for Anchor compatibility
+      const cipherPayloadBuffer = Buffer.from(encryptedOrder.cipherPayload);
+      
+      // Ensure it's exactly 512 bytes (pad if needed)
+      const paddedCipherPayload = Buffer.alloc(512);
+      cipherPayloadBuffer.copy(paddedCipherPayload, 0, 0, Math.min(cipherPayloadBuffer.length, 512));
 
-      const encryptedAmountBuffer = new Uint8Array(256);
-      const amountBytes = new TextEncoder().encode(amountLamports.toString());
-      encryptedAmountBuffer.set(amountBytes.slice(0, 256));
+      // Create encrypted amount buffer (64 bytes to match MAX_ENCRYPTED_AMOUNT_SIZE)
+      const encryptedAmountBuffer = Buffer.alloc(64);
+      const amountBytes = Buffer.from(amountLamports.toString(), 'utf-8');
+      amountBytes.copy(encryptedAmountBuffer, 0, 0, Math.min(amountBytes.length, 64));
 
       // Build submit order instruction
       const submitOrderIx = await this.program.methods
-        .submitEncryptedOrder(cipherPayloadBuffer, encryptedAmountBuffer)
+        .submitEncryptedOrder(paddedCipherPayload, encryptedAmountBuffer)
         .accounts({
           orderBook: this.orderBook,
           order: orderPda,
@@ -188,6 +203,16 @@ export class ShadowSwapClient {
       return { success: true, signature };
     } catch (error: any) {
       console.error('Error submitting order:', error);
+      
+      // If transaction already processed, treat as success
+      if (error.message?.includes('already been processed') || error.message?.includes('AlreadyProcessed')) {
+        console.log('Transaction already processed - order was successfully submitted');
+        return { 
+          success: true, 
+          signature: 'already-processed' 
+        };
+      }
+      
       return { 
         success: false, 
         error: error.message || 'Failed to submit order' 
@@ -284,20 +309,54 @@ export class ShadowSwapClient {
       // Fetch order account
       const orderAccount = await (this.program.account as any).encryptedOrder.fetch(orderAddress);
       
+      // Check if order can be cancelled (must be ACTIVE or PARTIAL)
+      const canCancel = orderAccount.status === ORDER_STATUS.ACTIVE || orderAccount.status === ORDER_STATUS.PARTIAL;
+      
+      if (!canCancel) {
+        const statusText = this.getOrderStatusText(orderAccount.status);
+        return { 
+          success: false, 
+          error: `Cannot cancel order - current status: ${statusText}. The order may have already been filled or cancelled.` 
+        };
+      }
+      
       // Derive PDAs
       const [escrowPda] = deriveEscrowPda(orderAddress, this.programId);
       const [escrowTokenPda] = deriveEscrowTokenAccountPda(orderAddress, this.programId);
 
-      // Determine token mint from order
-      const tokenMint = orderAccount.side === 0 ? this.quoteMint : this.baseMint;
+      // Fetch the escrow token account to check what mint it holds
+      const escrowTokenAccountInfo = await this.connection.getAccountInfo(escrowTokenPda);
+      if (!escrowTokenAccountInfo) {
+        return { success: false, error: 'Escrow token account not found' };
+      }
 
-      // Get user token account
+      // Parse the token account to get the mint
+      const escrowTokenData = AccountLayout.decode(escrowTokenAccountInfo.data);
+      const tokenMint = new PublicKey(escrowTokenData.mint);
+
+      console.log('Cancelling order:', {
+        orderAddress: orderAddress.toString(),
+        orderBook: this.orderBook.toString(),
+        escrow: escrowPda.toString(),
+        escrowTokenAccount: escrowTokenPda.toString(),
+        tokenMint: tokenMint.toString(),
+        orderSide: orderAccount.side,
+        owner: this.provider.publicKey.toString(),
+      });
+
+      // Create transaction
+      const transaction = new Transaction();
+
+      // Get or create user token account for refund
       const userTokenAccount = await getOrCreateAssociatedTokenAccount(
         this.connection,
         tokenMint,
         this.provider.publicKey,
-        this.provider.publicKey
+        this.provider.publicKey,
+        transaction
       );
+
+      console.log('User token account:', userTokenAccount.toString());
 
       // Build cancel instruction
       const cancelIx = await this.program.methods
@@ -307,21 +366,74 @@ export class ShadowSwapClient {
           escrow: escrowPda,
           escrowTokenAccount: escrowTokenPda,
           userTokenAccount: userTokenAccount,
+          orderBook: this.orderBook,
           owner: this.provider.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
         .instruction();
 
-      const transaction = new Transaction().add(cancelIx);
+      transaction.add(cancelIx);
+
+      // If refunding wSOL, add instruction to close the wSOL account and recover rent
+      if (tokenMint.equals(NATIVE_MINT)) {
+        const closeWsolIx = createCloseAccountInstruction(
+          userTokenAccount,
+          this.provider.publicKey,
+          this.provider.publicKey
+        );
+        transaction.add(closeWsolIx);
+      }
+
       const signature = await this.provider.sendAndConfirm(transaction);
+
+      console.log('Order cancelled successfully:', signature);
 
       return { success: true, signature };
     } catch (error: any) {
       console.error('Error cancelling order:', error);
+      
+      // Check for specific error codes
+      if (error.message?.includes('InvalidOrderStatus')) {
+        return { 
+          success: false, 
+          error: 'Order status changed - it may have been filled or already cancelled. Please refresh to see the latest status.' 
+        };
+      }
+      
+      // If transaction already processed, treat as success
+      if (error.message?.includes('already been processed') || error.message?.includes('AlreadyProcessed')) {
+        console.log('Transaction already processed - order was successfully cancelled');
+        return { 
+          success: true, 
+          signature: 'already-processed' 
+        };
+      }
+      
       return { 
         success: false, 
         error: error.message || 'Failed to cancel order' 
       };
+    }
+  }
+
+  /**
+   * Get human-readable order status text
+   */
+  private getOrderStatusText(status: number): string {
+    switch (status) {
+      case ORDER_STATUS.ACTIVE:
+        return "Active"
+      case ORDER_STATUS.PARTIAL:
+        return "Partially Filled"
+      case ORDER_STATUS.FILLED:
+      case ORDER_STATUS.EXECUTED:
+        return "Filled"
+      case ORDER_STATUS.CANCELLED:
+        return "Cancelled"
+      case ORDER_STATUS.MATCHED_PENDING:
+        return "Matching"
+      default:
+        return "Unknown"
     }
   }
 }

@@ -8,6 +8,7 @@ import { PriceCharts } from "./price-charts"
 import { ArrowRightLeft, ChevronDown, AlertCircle } from "lucide-react"
 import { useWallet } from "@/contexts/WalletContext"
 import { useShadowSwap } from "@/hooks/useShadowSwap"
+import { useCurrentPrice } from "@/hooks/useCurrentPrice"
 import { toast } from "sonner"
 
 // All available tokens for selection (only tokens with icons from liquidity pool)
@@ -69,6 +70,9 @@ export function TradeSection() {
   const { isWalletConnected, walletAddress, connectWallet } = useWallet()
   const { submitOrder, getBalances, isLoading, error } = useShadowSwap()
   
+  // Get real-time SOL price
+  const { price: currentMarketPrice, isLoading: isPriceLoading } = useCurrentPrice()
+  
   const [fromToken, setFromToken] = useState("SOL")
   const [toToken, setToToken] = useState("USDC")
   const [fromAmount, setFromAmount] = useState("")
@@ -76,19 +80,25 @@ export function TradeSection() {
   const [limitPrice, setLimitPrice] = useState("")
   const [orderType, setOrderType] = useState<"limit" | "market">("limit")
   const [allowLiquidityPool, setAllowLiquidityPool] = useState(false)
+  const [daysToKeepOpen, setDaysToKeepOpen] = useState("7") // Default 7 days
   
   // Balance state
   const [solBalance, setSolBalance] = useState(0)
   const [usdcBalance, setUsdcBalance] = useState(0)
   
+  // Submission state
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  
   // Dropdown state
   const [showFromDropdown, setShowFromDropdown] = useState(false)
   const [showToDropdown, setShowToDropdown] = useState(false)
+  const [showDaysDropdown, setShowDaysDropdown] = useState(false)
   const [visibleTokenCount, setVisibleTokenCount] = useState(8)
   
   // Refs for click outside detection
   const fromDropdownRef = useRef<HTMLDivElement>(null)
   const toDropdownRef = useRef<HTMLDivElement>(null)
+  const daysDropdownRef = useRef<HTMLDivElement>(null)
 
   // Load balances when wallet connects
   useEffect(() => {
@@ -96,6 +106,45 @@ export function TradeSection() {
       loadBalances()
     }
   }, [isWalletConnected])
+
+  // Auto-calculate "To" amount based on price and amount
+  useEffect(() => {
+    if (!fromAmount || parseFloat(fromAmount) <= 0) {
+      setToAmount("")
+      return
+    }
+
+    const amount = parseFloat(fromAmount)
+    let calculatedAmount = 0
+
+    if (orderType === "market") {
+      // Use current market price
+      if (fromToken === "SOL") {
+        // Selling SOL for USDC: amount * price
+        calculatedAmount = amount * currentMarketPrice
+      } else {
+        // Buying SOL with USDC: amount / price
+        calculatedAmount = amount / currentMarketPrice
+      }
+    } else {
+      // Limit order - use limit price
+      if (!limitPrice || parseFloat(limitPrice) <= 0) {
+        setToAmount("")
+        return
+      }
+      
+      const price = parseFloat(limitPrice)
+      if (fromToken === "SOL") {
+        // Selling SOL for USDC: amount * price
+        calculatedAmount = amount * price
+      } else {
+        // Buying SOL with USDC: amount / price
+        calculatedAmount = amount / price
+      }
+    }
+
+    setToAmount(calculatedAmount.toFixed(6))
+  }, [fromAmount, limitPrice, orderType, fromToken, currentMarketPrice])
 
   const loadBalances = async () => {
     try {
@@ -116,6 +165,9 @@ export function TradeSection() {
       if (toDropdownRef.current && !toDropdownRef.current.contains(event.target as Node)) {
         setShowToDropdown(false)
       }
+      if (daysDropdownRef.current && !daysDropdownRef.current.contains(event.target as Node)) {
+        setShowDaysDropdown(false)
+      }
     }
 
     document.addEventListener('mousedown', handleClickOutside)
@@ -135,32 +187,37 @@ export function TradeSection() {
     setFromToken(toToken)
     setToToken(fromToken)
     setFromAmount(toAmount)
-    setToAmount(fromAmount)
+    // toAmount will auto-calculate via useEffect
   }
 
   const handleTrade = async () => {
+    // Prevent double-clicks
+    if (isSubmitting) {
+      return
+    }
+
     // Validate wallet connection
     if (!isWalletConnected) {
-      toast.error("Please connect your wallet first")
+      toast.error("Please connect your wallet first", { dismissible: true })
       return
     }
 
     // Currently only SOL/USDC pair is supported
     if ((fromToken !== "SOL" && fromToken !== "USDC") || (toToken !== "SOL" && toToken !== "USDC")) {
-      toast.warning("Currently only SOL/USDC trading pair is supported")
+      toast.warning("Currently only SOL/USDC trading pair is supported", { dismissible: true })
       return
     }
 
     // Validate amount
     if (!fromAmount || parseFloat(fromAmount) <= 0) {
-      toast.error("Please enter a valid amount")
+      toast.error("Please enter a valid amount", { dismissible: true })
       return
     }
 
     // Validate price for limit orders
     if (orderType === "limit") {
       if (!limitPrice || parseFloat(limitPrice) <= 0) {
-        toast.error("Please enter a valid limit price")
+        toast.error("Please enter a valid limit price", { dismissible: true })
         return
       }
     }
@@ -172,22 +229,36 @@ export function TradeSection() {
 
     if (orderType === "market") {
       price = 100 // Default market price - will be matched by bot
-      toast.info("Market orders use best available price")
+      toast.info("Market orders use best available price", { dismissible: true })
     } else {
       price = parseFloat(limitPrice)
     }
 
+    // Note: Days dropdown is UI-only for now - expiration feature coming soon
+    if (orderType === "limit" && daysToKeepOpen !== "0") {
+      console.log("Selected order duration:", daysToKeepOpen, "days (UI only - not implemented yet)")
+    }
+
     try {
-      toast.loading("Submitting order to blockchain...")
+      setIsSubmitting(true)
+      
+      const loadingToast = toast.loading("Submitting order to blockchain...", {
+        duration: Infinity, // Don't auto-dismiss
+        dismissible: true, // Allow manual dismiss with X button
+      })
       
       const result = await submitOrder({ side, price, amount })
+      
+      // Dismiss the loading toast before showing result
+      toast.dismiss(loadingToast)
       
       if (result.success) {
         toast.success(
           <div>
             <p className="font-semibold">Order submitted successfully!</p>
             <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
-          </div>
+          </div>,
+          { dismissible: true }
         )
         
         // Reset form
@@ -198,11 +269,13 @@ export function TradeSection() {
         // Refresh balances
         loadBalances()
       } else {
-        toast.error(`Order failed: ${result.error}`)
+        toast.error(`Order failed: ${result.error}`, { dismissible: true })
       }
     } catch (err: any) {
       console.error("Trade error:", err)
-      toast.error(err.message || "Failed to submit order")
+      toast.error(err.message || "Failed to submit order", { dismissible: true })
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -229,26 +302,35 @@ export function TradeSection() {
                   
                   {/* Liquidity Pool Fallback Toggle */}
                   <div className="relative group">
-                    <button
-                      onClick={() => setAllowLiquidityPool(!allowLiquidityPool)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                        allowLiquidityPool
-                          ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
-                          : 'bg-white/5 border-white/10 text-white/60 hover:border-white/20'
-                      }`}
-                    >
-                      <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
-                        allowLiquidityPool ? 'border-purple-400' : 'border-white/40'
-                      }`}>
-                        {allowLiquidityPool && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                        )}
-                      </div>
-                      <span>LP Fallback</span>
-                    </button>
+                    <div className="relative overflow-hidden">
+                      <button
+                        onClick={() => setAllowLiquidityPool(!allowLiquidityPool)}
+                        className={`relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                          allowLiquidityPool
+                            ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
+                            : 'bg-white/5 border-white/10 text-white/60 hover:border-white/20'
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                          allowLiquidityPool ? 'border-purple-400' : 'border-white/40'
+                        }`}>
+                          {allowLiquidityPool && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                          )}
+                        </div>
+                        <span>LP Fallback</span>
+                      </button>
+                      {/* Animated lines - same as connect wallet button */}
+                      {!allowLiquidityPool && (
+                        <>
+                          <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+                          <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+                        </>
+                      )}
+                    </div>
 
                     {/* Tooltip - positioned above button */}
-                    <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                    <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
                       <p className="text-xs text-white/80 leading-relaxed">
                         Enable this to allow your order to execute through liquidity pools if no direct orderbook match is found. 
                         <span className="text-purple-400 font-medium"> Note:</span> This may reduce privacy guarantees but ensures order execution.
@@ -365,14 +447,17 @@ export function TradeSection() {
 
                 {/* To Token */}
                 <div>
-                  <label className="block text-sm text-white/70 mb-2">To</label>
+                  <label className="block text-sm text-white/70 mb-2">
+                    To (Estimated)
+                  </label>
                   <div className="flex gap-2">
                     <Input
                       type="number"
                       placeholder="0.00"
                       value={toAmount}
-                      onChange={(e) => setToAmount(e.target.value)}
-                      className="flex-1"
+                      disabled
+                      readOnly
+                      className="flex-1 bg-white/5 cursor-not-allowed"
                     />
                     {/* Old static button - keeping for reference
                     <button className="px-4 py-2 bg-white/10 hover:bg-white/20 active:bg-white/30 rounded-md text-white font-medium transition-colors touch-manipulation">
@@ -426,6 +511,12 @@ export function TradeSection() {
                   <div className="text-xs text-white/40 mt-1">
                     Balance: {isWalletConnected ? `${usdcBalance.toFixed(2)} USDC` : 'Connect wallet'}
                   </div>
+                  <div className="text-xs text-purple-400/60 mt-1 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Auto-calculated based on {orderType === "limit" ? "your limit price" : "market price"}
+                  </div>
                 </div>
 
                 {/* Price Input (for limit orders) */}
@@ -442,15 +533,22 @@ export function TradeSection() {
                   </div>
                 )}
 
-                {/* Fee Info */}
-                <div className="bg-white/5 p-3 rounded-lg space-y-2 text-sm">
-                  <div className="flex justify-between text-white/60">
-                    <span>Exchange Rate</span>
-                    <span>1 SOL = 142.50 USDC</span>
-                  </div>
-                  <div className="flex justify-between text-white/60">
-                    <span>Fee</span>
-                    <span className="text-purple-400">0.1%</span>
+                {/* Current Market Price Info */}
+                <div className="bg-white/5 p-3 rounded-lg text-sm">
+                  <div className="flex justify-between items-center text-white/60">
+                    <span>Current Market Price</span>
+                    {isPriceLoading ? (
+                      <span className="text-white/40 text-xs">Loading...</span>
+                    ) : (
+                      <span className="text-purple-400 font-medium">
+                        {fromToken === "SOL" && toToken === "USDC" 
+                          ? `1 SOL = $${currentMarketPrice.toFixed(2)} USDC`
+                          : fromToken === "USDC" && toToken === "SOL"
+                          ? `1 USDC = ${(1 / currentMarketPrice).toFixed(6)} SOL`
+                          : `1 ${fromToken} = ${toToken}`
+                        }
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -464,22 +562,89 @@ export function TradeSection() {
                   </div>
                 ) : null}
 
-                {/* Action Button */}
-                <Button 
-                  variant="default" 
-                  size="lg" 
-                  className="w-full"
-                  onClick={handleTrade}
-                  disabled={isLoading || !isWalletConnected}
-                >
-                  {isLoading 
-                    ? "Processing..." 
-                    : !isWalletConnected 
-                    ? "Connect Wallet to Trade" 
-                    : orderType === "limit" 
-                    ? "Place Limit Order" 
-                    : "Execute Market Order"}
-                </Button>
+                {/* Action Button & Days Dropdown (Side by Side) */}
+                <div className="flex gap-3">
+                  {/* Place Order Button */}
+                  <Button 
+                    variant="default" 
+                    size="lg" 
+                    className={orderType === "limit" ? "flex-1" : "w-full"}
+                    onClick={handleTrade}
+                    disabled={isSubmitting || !isWalletConnected}
+                  >
+                    {isSubmitting 
+                      ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Submitting...
+                        </span>
+                      )
+                      : !isWalletConnected 
+                      ? "Connect Wallet to Trade" 
+                      : orderType === "limit" 
+                      ? "Place Limit Order" 
+                      : "Execute Market Order"}
+                  </Button>
+
+                  {/* Days Dropdown - Only for Limit Orders */}
+                  {orderType === "limit" && (
+                    <div className="relative" ref={daysDropdownRef}>
+                      <button
+                        onClick={() => {
+                          setShowDaysDropdown(!showDaysDropdown)
+                          setShowFromDropdown(false)
+                          setShowToDropdown(false)
+                        }}
+                        className="h-full flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 border border-white/20 rounded-md text-white transition-colors whitespace-nowrap"
+                      >
+                        <span className="text-xs font-medium">
+                          {daysToKeepOpen === "0" 
+                            ? "∞" 
+                            : `${daysToKeepOpen}d`
+                          }
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+
+                      {showDaysDropdown && (
+                        <div className="absolute bottom-full right-0 mb-2 w-40 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[200]">
+                          <div className="py-0.5">
+                            {[
+                              { value: "1", label: "1 Day" },
+                              { value: "3", label: "3 Days" },
+                              { value: "7", label: "7 Days" },
+                              { value: "14", label: "14 Days" },
+                              { value: "30", label: "30 Days" },
+                              { value: "90", label: "90 Days" },
+                              { value: "0", label: "Until Cancelled" },
+                            ].map((option) => (
+                              <button
+                                key={option.value}
+                                onClick={() => {
+                                  setDaysToKeepOpen(option.value)
+                                  setShowDaysDropdown(false)
+                                }}
+                                className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
+                                  daysToKeepOpen === option.value ? "bg-purple-500/20" : ""
+                                }`}
+                              >
+                                <span className="text-white text-xs">{option.label}</span>
+                                {daysToKeepOpen === option.value && (
+                                  <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                  </svg>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>

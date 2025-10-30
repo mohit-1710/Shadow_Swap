@@ -22,8 +22,8 @@ export function deriveOrderPda(
   orderCount: BN,
   programId: PublicKey
 ): [PublicKey, number] {
-  const orderCountBuffer = Buffer.alloc(8);
-  orderCountBuffer.writeBigUInt64LE(BigInt(orderCount.toString()));
+  // Use BN's toArrayLike method for better browser compatibility
+  const orderCountBuffer = orderCount.toArrayLike(Buffer, 'le', 8);
   
   return PublicKey.findProgramAddressSync(
     [

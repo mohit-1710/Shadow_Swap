@@ -1,51 +1,25 @@
 "use client"
 
+import { useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
-
-// Mock order data with real timestamps
-const mockOrders = [
-  {
-    id: "ORD-12345",
-    pair: "SOL/USDC",
-    type: "Limit Buy",
-    amount: 5.5,
-    price: 142.0,
-    status: "Filled",
-    createdAt: new Date(Date.now() - 3600000).toISOString(), // 1 hour ago
-  },
-  {
-    id: "ORD-12344",
-    pair: "ETH/USDC",
-    type: "Market Sell",
-    amount: 2.0,
-    price: 2450.0,
-    status: "Ongoing",
-    createdAt: new Date(Date.now() - 600000).toISOString(), // 10 minutes ago
-  },
-  {
-    id: "ORD-12343",
-    pair: "SOL/USDC",
-    type: "Limit Sell",
-    amount: 10.0,
-    price: 145.0,
-    status: "Canceled",
-    createdAt: new Date(Date.now() - 7200000).toISOString(), // 2 hours ago
-  },
-  {
-    id: "ORD-12342",
-    pair: "SOL/USDC",
-    type: "Market Buy",
-    amount: 3.2,
-    price: 141.5,
-    status: "Filled",
-    createdAt: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
-  },
-]
+import { Button } from "@/components/ui/button"
+import { useWallet } from "@/contexts/WalletContext"
+import { useOrderBook } from "@/hooks/useOrderBook"
+import { useShadowSwap } from "@/hooks/useShadowSwap"
+import { PublicKey } from "@solana/web3.js"
+import { RefreshCw, Loader2 } from "lucide-react"
+import { toast } from "sonner"
+import { ORDER_STATUS } from "@/lib/program"
 
 export function OrderHistory() {
-  const formatDate = (isoString: string) => {
-    const date = new Date(isoString)
+  const { isWalletConnected } = useWallet()
+  const { orders, isLoading, error, refresh } = useOrderBook(5000) // Refresh every 5s
+  const { cancelOrder } = useShadowSwap()
+  const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null)
+
+  const formatDate = (timestamp: number) => {
+    const date = new Date(timestamp * 1000) // Convert Unix timestamp to milliseconds
     return date.toLocaleString('en-US', {
       month: 'short',
       day: 'numeric',
@@ -55,75 +29,193 @@ export function OrderHistory() {
     })
   }
 
-  const getStatusVariant = (status: string): "success" | "warning" | "error" => {
+  const getStatusText = (status: number): string => {
     switch (status) {
-      case "Filled":
+      case ORDER_STATUS.ACTIVE:
+        return "Active"
+      case ORDER_STATUS.PARTIAL:
+        return "Partial"
+      case ORDER_STATUS.FILLED:
+      case ORDER_STATUS.EXECUTED:
+        return "Filled"
+      case ORDER_STATUS.CANCELLED:
+        return "Cancelled"
+      case ORDER_STATUS.MATCHED_PENDING:
+        return "Matching"
+      default:
+        return "Unknown"
+    }
+  }
+
+  const getStatusVariant = (status: number): "success" | "warning" | "error" => {
+    switch (status) {
+      case ORDER_STATUS.FILLED:
+      case ORDER_STATUS.EXECUTED:
         return "success"
-      case "Ongoing":
+      case ORDER_STATUS.ACTIVE:
+      case ORDER_STATUS.PARTIAL:
+      case ORDER_STATUS.MATCHED_PENDING:
         return "warning"
-      case "Canceled":
+      case ORDER_STATUS.CANCELLED:
         return "error"
       default:
         return "warning"
     }
   }
 
+  const handleCancelOrder = async (orderAddress: string) => {
+    // Prevent double-clicks
+    if (cancellingOrderId) {
+      return
+    }
+
+    try {
+      setCancellingOrderId(orderAddress)
+      
+      const loadingToast = toast.loading("Cancelling order...", {
+        duration: Infinity,
+        dismissible: true,
+      })
+      
+      const result = await cancelOrder(new PublicKey(orderAddress))
+      
+      // Dismiss loading toast
+      toast.dismiss(loadingToast)
+      
+      if (result.success) {
+        toast.success("Order cancelled successfully!", { dismissible: true })
+        // Refresh immediately to show updated status
+        refresh()
+      } else {
+        toast.error(`${result.error}`, { 
+          dismissible: true,
+          duration: 5000,
+        })
+        // Refresh anyway to show latest order status
+        setTimeout(() => refresh(), 500)
+      }
+    } catch (err: any) {
+      console.error("Error cancelling order:", err)
+      toast.error(err.message || "Failed to cancel order", { dismissible: true })
+      // Refresh to show latest order status
+      setTimeout(() => refresh(), 500)
+    } finally {
+      setCancellingOrderId(null)
+    }
+  }
+
+  if (!isWalletConnected) {
+    return (
+      <Card className="w-full">
+        <CardHeader>
+          <CardTitle>Order History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="py-12 text-center text-white/40">
+            Connect your wallet to view your order history
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   return (
     <Card className="w-full">
-      <CardHeader>
+      <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Order History</CardTitle>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={refresh}
+          disabled={isLoading}
+          className="gap-2"
+        >
+          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          Refresh
+        </Button>
       </CardHeader>
       <CardContent>
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400 text-sm">
+            {error}
+          </div>
+        )}
+
         <div className="overflow-x-auto -mx-2 sm:mx-0">
-          <table className="w-full text-xs sm:text-sm min-w-[500px]">
+          <table className="w-full text-xs sm:text-sm min-w-[600px]">
             <thead>
               <tr className="border-b border-white/10">
-                {/* Old: Order # - keeping for reference
-                <th className="text-left py-3 px-4 text-white/60 font-medium">Order #</th>
-                */}
-                <th className="text-left py-3 px-4 text-white/60 font-medium">Order id</th>
+                <th className="text-left py-3 px-4 text-white/60 font-medium">Order ID</th>
                 <th className="text-left py-3 px-4 text-white/60 font-medium">Pair</th>
-                <th className="text-left py-3 px-4 text-white/60 font-medium">Type</th>
-                {/* Removed Amount and Price columns */}
                 <th className="text-center py-3 px-4 text-white/60 font-medium">Status</th>
                 <th className="text-right py-3 px-4 text-white/60 font-medium">Created At</th>
+                <th className="text-center py-3 px-4 text-white/60 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {mockOrders.map((order) => (
-                <tr 
-                  key={order.id}
-                  className="border-b border-white/5 hover:bg-white/5 transition-colors"
-                >
-                  <td className="py-3 px-4 text-white font-medium">{order.id}</td>
-                  <td className="py-3 px-4 text-white">{order.pair}</td>
-                  <td className="py-3 px-4">
-                    <span className={order.type.includes("Buy") ? "text-green-400" : "text-red-400"}>
-                      {order.type}
-                    </span>
-                  </td>
-                  {/* Removed Amount and Price cells */}
-                  <td className="py-3 px-4 text-center">
-                    <Pill variant={getStatusVariant(order.status)}>
-                      {order.status}
-                    </Pill>
-                  </td>
-                  <td className="py-3 px-4 text-right text-white/50 text-xs">
-                    {formatDate(order.createdAt)}
+              {isLoading && orders.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-white/40">
+                    <Loader2 className="w-6 h-6 animate-spin mx-auto mb-2" />
+                    Loading orders...
                   </td>
                 </tr>
-              ))}
+              ) : orders.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="py-12 text-center text-white/40">
+                    No orders yet. Place your first trade to see your order history here.
+                  </td>
+                </tr>
+              ) : (
+                orders.map((order) => (
+                  <tr 
+                    key={order.publicKey}
+                    className="border-b border-white/5 hover:bg-white/5 transition-colors"
+                  >
+                    <td className="py-3 px-4 text-white font-mono text-xs">
+                      {order.orderId.slice(0, 8)}...
+                    </td>
+                    <td className="py-3 px-4 text-white">SOL/USDC</td>
+                    <td className="py-3 px-4 text-center">
+                      <Pill variant={getStatusVariant(order.status)}>
+                        {getStatusText(order.status)}
+                      </Pill>
+                    </td>
+                    <td className="py-3 px-4 text-right text-white/50 text-xs">
+                      {formatDate(order.createdAt)}
+                    </td>
+                    <td className="py-3 px-4 text-center">
+                      {order.status === ORDER_STATUS.ACTIVE || order.status === ORDER_STATUS.PARTIAL ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCancelOrder(order.publicKey)}
+                          disabled={cancellingOrderId !== null}
+                          className="text-red-400 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                          title="Cancel this order"
+                        >
+                          {cancellingOrderId === order.publicKey ? (
+                            <>
+                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                              Cancelling...
+                            </>
+                          ) : (
+                            'Cancel'
+                          )}
+                        </Button>
+                      ) : order.status === ORDER_STATUS.MATCHED_PENDING ? (
+                        <span className="text-yellow-400 text-xs" title="Order is being matched">Processing...</span>
+                      ) : (
+                        <span className="text-white/30 text-xs">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>
-
-        {mockOrders.length === 0 && (
-          <div className="py-12 text-center text-white/40">
-            No orders yet. Place your first trade to see your order history here.
-          </div>
-        )}
       </CardContent>
     </Card>
   )
 }
-

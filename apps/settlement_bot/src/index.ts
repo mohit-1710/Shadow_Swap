@@ -854,8 +854,8 @@ async function main() {
   const config: KeeperConfig = {
     rpcUrl: defaultRpcUrl,
     wssUrl: process.env.WSS_URL,
-    programId: process.env.PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt',
-    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8',
+    programId: process.env.PROGRAM_ID || 'CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA',
+    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || '63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ',
     idlPath: process.env.SHADOW_SWAP_IDL_PATH || process.env.IDL_PATH,
     keeperKeypairPath: process.env.KEEPER_KEYPAIR_PATH || '~/.config/solana/id.json',
     arciumMpcUrl: process.env.ARCIUM_MPC_URL || 'https://mpc.arcium.com',

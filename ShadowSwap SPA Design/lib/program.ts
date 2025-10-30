@@ -22,8 +22,8 @@ export function deriveOrderPda(
   orderCount: BN,
   programId: PublicKey
 ): [PublicKey, number] {
-  const orderCountBuffer = Buffer.alloc(8);
-  orderCountBuffer.writeBigUInt64LE(BigInt(orderCount.toString()));
+  // Use BN's toArrayLike method for better browser compatibility
+  const orderCountBuffer = orderCount.toArrayLike(Buffer, 'le', 8);
   
   return PublicKey.findProgramAddressSync(
     [
@@ -103,22 +103,31 @@ export function deriveCallbackAuthPda(
 
 /**
  * Fetch order count from OrderBook account
+ * Note: This requires the program instance to properly deserialize the account
  */
 export async function fetchOrderCount(
   connection: Connection,
-  orderBookAddress: PublicKey
+  orderBookAddress: PublicKey,
+  program?: any
 ): Promise<BN> {
   try {
+    if (program) {
+      // Use Anchor program to fetch and deserialize the order book account
+      const orderBookAccount = await program.account.orderBook.fetch(orderBookAddress);
+      return new BN(orderBookAccount.orderCount.toString());
+    }
+    
+    // Fallback: manual parsing (less reliable)
     const accountInfo = await connection.getAccountInfo(orderBookAddress);
     
     if (!accountInfo) {
       throw new Error('Order book account not found');
     }
     
-    // Parse order_count from account data
-    // Assuming order_count is at offset 40 (after authority + base_mint + quote_mint)
-    // Adjust based on your actual struct layout
-    const offset = 40;
+    // OrderBook struct layout:
+    // discriminator (8) + authority (32) + base_mint (32) + quote_mint (32) = 104 bytes
+    // Then order_count (u64 - 8 bytes) starts at offset 104
+    const offset = 104;
     const orderCountBuffer = accountInfo.data.slice(offset, offset + 8);
     const orderCount = new BN(orderCountBuffer, 'le');
     
