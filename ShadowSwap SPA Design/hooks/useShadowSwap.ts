@@ -19,20 +19,15 @@ export function useShadowSwap() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (isWalletConnected && wallet?.publicKey && wallet?.signTransaction) {
+    if (wallet?.publicKey && wallet?.signTransaction) {
       try {
+        console.log('🔌 Initializing ShadowSwapClient...')
         const connection = new Connection(RPC_URL, "confirmed")
         
-        // Create a wallet adapter compatible object
         const walletAdapter = {
           publicKey: wallet.publicKey,
-          signTransaction: wallet.signTransaction.bind(wallet),
-          signAllTransactions: wallet.signAllTransactions?.bind(wallet) || (async (txs: any[]) => {
-            if (wallet.signTransaction) {
-              return Promise.all(txs.map(tx => wallet.signTransaction!(tx)))
-            }
-            throw new Error('signTransaction not available')
-          }),
+          signTransaction: wallet.signTransaction,
+          signAllTransactions: wallet.signAllTransactions,
         }
 
         const provider = new AnchorProvider(connection, walletAdapter as any, {
@@ -42,15 +37,16 @@ export function useShadowSwap() {
         const client = new ShadowSwapClient(provider, PROGRAM_ID, ORDER_BOOK, BASE_MINT, QUOTE_MINT)
         setShadowSwapClient(client)
         setError(null)
+        console.log('✅ ShadowSwapClient initialized successfully')
       } catch (e: any) {
-        console.error("Failed to initialize ShadowSwapClient:", e)
+        console.error("❌ Failed to initialize ShadowSwapClient:", e)
         setError(e.message || "Failed to initialize ShadowSwap client")
         setShadowSwapClient(null)
       }
     } else {
       setShadowSwapClient(null)
     }
-  }, [isWalletConnected, wallet])
+  }, [wallet?.publicKey, wallet?.signTransaction, wallet?.signAllTransactions])
 
   const submitOrder = useCallback(async (params: OrderParams): Promise<OrderResult> => {
     if (!shadowSwapClient) {
@@ -77,13 +73,14 @@ export function useShadowSwap() {
 
   const getBalances = useCallback(async (): Promise<BalanceData> => {
     if (!shadowSwapClient) {
+      console.warn("⚠️ getBalances called but shadowSwapClient is null - client not initialized yet")
       return { sol: 0, usdc: 0 }
     }
 
     try {
       return await shadowSwapClient.getBalances()
     } catch (e: any) {
-      console.error("Error fetching balances:", e)
+      console.error("❌ Error fetching balances in useShadowSwap:", e)
       return { sol: 0, usdc: 0 }
     }
   }, [shadowSwapClient])

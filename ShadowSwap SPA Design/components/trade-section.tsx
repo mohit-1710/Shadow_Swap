@@ -100,12 +100,15 @@ export function TradeSection() {
   const toDropdownRef = useRef<HTMLDivElement>(null)
   const daysDropdownRef = useRef<HTMLDivElement>(null)
 
-  // Load balances when wallet connects
+  // Load balances when wallet connects or client initializes
   useEffect(() => {
-    if (isWalletConnected) {
+    if (!isWalletConnected) return
+    // Small delay gives the ShadowSwap client time to initialize
+    const timer = setTimeout(() => {
       loadBalances()
-    }
-  }, [isWalletConnected])
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [isWalletConnected, getBalances, walletAddress])
 
   // Auto-calculate "To" amount based on price and amount
   useEffect(() => {
@@ -431,7 +434,17 @@ export function TradeSection() {
                     </div>
                   </div>
                   <div className="text-xs text-white/40 mt-1">
-                    Balance: {isWalletConnected ? `${solBalance.toFixed(4)} SOL` : 'Connect wallet'}
+                    Balance: {
+                      isWalletConnected
+                        ? `${
+                            fromToken === "SOL"
+                              ? solBalance.toFixed(4)
+                              : fromToken === "USDC"
+                              ? usdcBalance.toFixed(2)
+                              : "0.00"
+                          } ${fromToken}`
+                        : 'Connect wallet'
+                    }
                   </div>
                 </div>
 
@@ -509,7 +522,17 @@ export function TradeSection() {
                     </div>
                   </div>
                   <div className="text-xs text-white/40 mt-1">
-                    Balance: {isWalletConnected ? `${usdcBalance.toFixed(2)} USDC` : 'Connect wallet'}
+                    Balance: {
+                      isWalletConnected
+                        ? `${
+                            toToken === "SOL"
+                              ? solBalance.toFixed(4)
+                              : toToken === "USDC"
+                              ? usdcBalance.toFixed(2)
+                              : "0.00"
+                          } ${toToken}`
+                        : 'Connect wallet'
+                    }
                   </div>
                   <div className="text-xs text-purple-400/60 mt-1 flex items-center gap-1">
                     <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
