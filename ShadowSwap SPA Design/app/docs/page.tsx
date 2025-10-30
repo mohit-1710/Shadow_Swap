@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Search, MessageCircle, BookOpen, Shield, Zap, Lock, Menu, X, ChevronRight, Send, ThumbsUp, ThumbsDown, Copy, RefreshCw, Trash2, Minimize2, Sparkles } from "lucide-react"
+import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 
 // Mock AI responses for chatbot demo
 const mockResponses = [
@@ -30,141 +31,29 @@ const docsSections = [
     id: "getting-started",
     title: "Getting Started",
     icon: BookOpen,
-    content: `
-      Welcome to ShadowSwap - the first privacy-preserving orderbook DEX on Solana.
-      
-      ## What is ShadowSwap?
-      
-      ShadowSwap is a decentralized exchange that combines the privacy of encrypted orders with the transparency of on-chain settlement. Unlike traditional DEXs where your trading intentions are visible in the mempool, ShadowSwap keeps your orders private until execution.
-      
-      ## How It Works
-      
-      1. **Connect Your Wallet**: Connect any Solana-compatible wallet (Phantom, Solflare, etc.)
-      2. **Place Encrypted Orders**: Your order details are encrypted client-side before being submitted
-      3. **Off-chain Matching**: Our keeper bot matches orders off-chain to prevent MEV
-      4. **On-chain Settlement**: Only the final settlement is executed on-chain with verifiable proofs
-      
-      ## Key Features
-      
-      - **MEV Protection**: Orders are encrypted and matched off-chain
-      - **Zero Hidden Costs**: No sandwich attacks or front-running fees
-      - **Complete Transparency**: All settlements are verifiable on Solana
-      - **Fast Execution**: Sub-second settlement times
-    `
+    slug: "getting-started",
+    description: "Complete guide to setting up and using ShadowSwap on Solana Devnet"
   },
   {
     id: "mev-protection",
     title: "MEV Protection",
     icon: Shield,
-    content: `
-      ## Understanding MEV
-      
-      Maximal Extractable Value (MEV) refers to profit extracted by reordering, inserting, or censoring transactions. On traditional DEXs, searcher bots have extracted over $1.5 billion from traders.
-      
-      ## How ShadowSwap Protects You
-      
-      ### Encrypted Orders
-      - Orders are encrypted client-side using your wallet
-      - Only the settlement bot can decrypt and match orders
-      - Your trading strategy remains private
-      
-      ### Batch Matching
-      - Orders are matched in batches off-chain
-      - No single order is visible in the mempool
-      - Eliminates sandwich attack opportunities
-      
-      ### Verifiable Settlement
-      - Final settlement includes cryptographic proofs
-      - All transfers are verifiable on Solana's ledger
-      - Complete transparency without exposing strategy
-      
-      ## Real Impact
-      
-      Studies show that similar approaches (like CoW Protocol) save users an estimated $500M per year by eliminating MEV losses.
-    `
+    slug: "mev-protection",
+    description: "How ShadowSwap eliminates front-running and sandwich attacks"
   },
   {
     id: "trading-guide",
     title: "Trading Guide",
     icon: Zap,
-    content: `
-      ## Placing Your First Trade
-      
-      ### 1. Select Your Trading Pair
-      - Click on the token selectors to choose your pair
-      - Popular pairs like SOL/USDC are always available
-      - Search for specific tokens in the dropdown
-      
-      ### 2. Choose Order Type
-      - **Limit Orders**: Set your desired price and amount
-      - **Market Orders**: Execute immediately at best available price
-      
-      ### 3. Enable LP Fallback (Optional)
-      - Toggle "LP Fallback" if you want guaranteed execution
-      - Note: This may reduce privacy guarantees
-      - Useful during low liquidity periods
-      
-      ### 4. Review and Submit
-      - Check the exchange rate and fees
-      - Click "Place Limit Order" or "Execute Trade"
-      - Confirm in your wallet
-      
-      ## Order Management
-      
-      - View your order history below the trading interface
-      - Orders show as Ongoing, Filled, or Canceled
-      - Cancel open orders anytime before execution
-      
-      ## Best Practices
-      
-      - Start with small amounts to familiarize yourself
-      - Use limit orders for better price control
-      - Enable LP fallback for time-sensitive trades
-      - Check liquidity pools for available pairs
-    `
+    slug: "trading-guide",
+    description: "Master limit orders, market orders, and advanced features"
   },
   {
-    id: "privacy",
+    id: "privacy-security",
     title: "Privacy & Security",
     icon: Lock,
-    content: `
-      ## Your Privacy Matters
-      
-      ShadowSwap is built with privacy-first principles while maintaining complete transparency where it matters.
-      
-      ### What's Private
-      
-      - **Order Details**: Price, amount, and direction are encrypted
-      - **Trading Strategy**: Your intentions remain hidden from MEV bots
-      - **Order Flow**: No public mempool exposure
-      
-      ### What's Transparent
-      
-      - **Final Settlement**: All executed trades are on Solana's ledger
-      - **Token Transfers**: Verifiable movement between addresses
-      - **Fees**: Clear and transparent fee structure
-      
-      ## Security Model
-      
-      ### Client-Side Encryption
-      - Orders encrypted using your wallet's keypair
-      - No server has access to your unencrypted orders
-      - Decryption only happens in the settlement process
-      
-      ### Smart Contract Security
-      - Open-source Anchor program
-      - Audited by security experts
-      - Escrow PDAs ensure safe custody
-      
-      ### No Custody
-      - ShadowSwap never holds your funds
-      - All operations use program-derived addresses
-      - You maintain full control of your assets
-      
-      ## Privacy Tradeoffs
-      
-      When enabling LP Fallback, your order may route through public liquidity pools, reducing privacy guarantees. This is a conscious tradeoff for guaranteed execution.
-    `
+    slug: "privacy-security",
+    description: "Cryptographic guarantees and security architecture"
   }
 ];
 
@@ -192,6 +81,8 @@ export default function DocsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSection, setActiveSection] = useState("getting-started");
   const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile sidebar toggle
+  const [markdownContent, setMarkdownContent] = useState<string>("");
+  const [isLoadingContent, setIsLoadingContent] = useState(false);
   
   // Chatbot state management
   const [chatState, setChatState] = useState<"collapsed" | "focused" | "expanded">("collapsed");
@@ -204,12 +95,40 @@ export default function DocsPage() {
   const chatInputRef = useRef<HTMLInputElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const currentSection = docsSections.find(s => s.id === activeSection);
+
+  // Fetch markdown content when section changes
+  useEffect(() => {
+    const fetchContent = async () => {
+      if (!currentSection) return;
+      
+      setIsLoadingContent(true);
+      try {
+        const response = await fetch(`/api/docs/${currentSection.slug}`);
+        if (response.ok) {
+          const data = await response.json();
+          setMarkdownContent(data.content);
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          console.error('Failed to fetch documentation:', errorData);
+          setMarkdownContent(`# Error\n\nFailed to load documentation content.\n\n**Status:** ${response.status}\n\n**Details:** ${errorData.error || 'Unknown error'}\n\n**Path:** ${errorData.path || 'Unknown'}`);
+        }
+      } catch (error) {
+        console.error('Error fetching documentation:', error);
+        setMarkdownContent(`# Error\n\nFailed to load documentation content.\n\n**Error:** ${error instanceof Error ? error.message : 'Unknown error'}`);
+      } finally {
+        setIsLoadingContent(false);
+      }
+    };
+
+    fetchContent();
+  }, [activeSection, currentSection]);
+
+  // Filter sections based on search (searches in title and description)
   const filteredSections = docsSections.filter(section =>
     section.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    section.content.toLowerCase().includes(searchQuery.toLowerCase())
+    section.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
-
-  const currentSection = docsSections.find(s => s.id === activeSection);
 
   // Handle section navigation - smooth scroll and close mobile menu
   const handleSectionClick = (sectionId: string) => {
@@ -458,7 +377,6 @@ export default function DocsPage() {
           </div>
 
           {/* Content Card with Enhanced Visual Hierarchy */}
-          {/* OLD: <Card className="glass"> */}
           <Card className="glass border-white/10 shadow-2xl">
             <CardContent className="p-8 md:p-12">
                 {currentSection && (
@@ -473,76 +391,28 @@ export default function DocsPage() {
                         </div>
                       );
                       })()}
-                    <h2 className="text-3xl md:text-4xl font-bold text-white">{currentSection.title}</h2>
+                    <div className="flex-1">
+                      <h2 className="text-3xl md:text-4xl font-bold text-white">{currentSection.title}</h2>
+                      <p className="text-white/50 text-sm mt-2">{currentSection.description}</p>
+                    </div>
                     </div>
                     
-                  {/* Enhanced Content Rendering */}
-                  {/* OLD: <div className="prose prose-invert max-w-none"> */}
-                  <div className="prose prose-invert prose-lg max-w-none">
-                    <div className="text-white/80 leading-relaxed space-y-6">
-                        {currentSection.content.split('\n').map((line, i) => {
-                        // H2 headings - Major sections with divider
-                          if (line.startsWith('##')) {
-                          return (
-                            <div key={i} className="mt-12 mb-6">
-                              <h3 className="text-3xl font-bold text-white mb-2 flex items-center gap-3">
-                                <span className="w-1.5 h-8 bg-purple-500 rounded-full"></span>
-                                {line.replace('##', '').trim()}
-                              </h3>
-                              <div className="h-px bg-gradient-to-r from-purple-500/50 via-purple-500/20 to-transparent"></div>
-                            </div>
-                          );
-                        } 
-                        // H3 headings - Subsections
-                        else if (line.startsWith('###')) {
-                          return (
-                            <h4 key={i} className="text-2xl font-semibold text-white/90 mt-8 mb-4 flex items-center gap-2">
-                              <ChevronRight className="w-5 h-5 text-purple-400" />
-                              {line.replace('###', '').trim()}
-                            </h4>
-                          );
-                        } 
-                        // Bullet points - Enhanced styling with custom bullets
-                        else if (line.startsWith('-')) {
-                          return (
-                            <div key={i} className="flex items-start gap-3 ml-2 mb-3 group">
-                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 mt-2.5 flex-shrink-0 group-hover:ring-4 group-hover:ring-purple-400/20 transition-all"></span>
-                              <span className="flex-1 text-white/70 leading-relaxed">{line.replace('-', '').trim()}</span>
-                            </div>
-                          );
-                        } 
-                        // Empty lines
-                        else if (line.trim() === '') {
-                          return <div key={i} className="h-2"></div>;
-                        } 
-                        // Numbered lists - Enhanced with card-like background
-                        else if (line.match(/^\d+\./)) {
-                          const number = line.match(/^\d+/)?.[0];
-                          const text = line.replace(/^\d+\./, '').trim();
-                          return (
-                            <div key={i} className="flex items-start gap-4 mb-4 p-4 rounded-lg bg-white/5 border border-white/10 hover:border-purple-400/30 transition-all">
-                              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-400 font-bold text-sm">
-                                {number}
-                              </span>
-                              <span className="flex-1 text-white/80 leading-relaxed mt-1">
-                                {text.split(':')[0] && <strong className="text-white font-semibold">{text.split(':')[0]}:</strong>}
-                                {text.split(':')[1] && <span className="text-white/70"> {text.split(':').slice(1).join(':')}</span>}
-                                {!text.includes(':') && text}
-                              </span>
-                            </div>
-                          );
-                        } 
-                        // Regular paragraphs
-                        else {
-                          return <p key={i} className="mb-5 text-white/70 leading-relaxed text-base">{line}</p>;
-                          }
-                        })}
+                  {/* Markdown Content Rendering */}
+                  {isLoadingContent ? (
+                    <div className="flex items-center justify-center py-16">
+                      <div className="flex items-center gap-3">
+                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "0ms" }}></div>
+                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "150ms" }}></div>
+                        <div className="w-2 h-2 rounded-full bg-purple-400 animate-bounce" style={{ animationDelay: "300ms" }}></div>
                       </div>
                     </div>
+                  ) : (
+                    <MarkdownRenderer content={markdownContent} />
+                  )}
                   </>
                 )}
 
-                {filteredSections.length === 0 && (
+                {filteredSections.length === 0 && !currentSection && (
                 <div className="text-center py-16">
                   <Search className="w-12 h-12 text-white/20 mx-auto mb-4" />
                   <p className="text-white/40 text-lg">No results found for "{searchQuery}"</p>

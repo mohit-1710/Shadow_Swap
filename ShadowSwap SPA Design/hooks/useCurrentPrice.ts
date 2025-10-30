@@ -23,12 +23,26 @@ export function useCurrentPrice() {
 
   useEffect(() => {
     let isMounted = true
+    let retryCount = 0
+    const MAX_RETRIES = 3
 
     async function fetchCurrentPrice() {
+      let timeoutId: NodeJS.Timeout | null = null
+
       try {
+        // Create abort controller for timeout
+        const controller = new AbortController()
+        timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout
+
         const response = await fetch(
-          "https://api.coingecko.com/api/v3/simple/price?ids=solana&vs_currencies=usd&include_24hr_change=true"
+          "/api/price", // Use the new API route
+          {
+            signal: controller.signal,
+            cache: 'no-cache',
+          }
         )
+
+        clearTimeout(timeoutId)
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
@@ -36,23 +50,38 @@ export function useCurrentPrice() {
 
         const data = await response.json()
         
-        if (isMounted) {
+        if (isMounted && data?.solana?.usd) {
           setPriceData({
             price: data.solana.usd,
             change24h: data.solana.usd_24h_change || 0,
             isLoading: false,
             error: null,
           })
+          retryCount = 0 // Reset retry count on success
         }
       } catch (error: any) {
-        console.error("Error fetching SOL price:", error)
+        if (timeoutId) clearTimeout(timeoutId)
+        // Only log error if we've exhausted retries
+        if (retryCount >= MAX_RETRIES) {
+          console.warn("Could not fetch live SOL price, using fallback")
+        }
+        
         if (isMounted) {
           setPriceData({
             price: 195.54, // Fallback price
             change24h: 0,
             isLoading: false,
-            error: error.message,
+            error: retryCount >= MAX_RETRIES ? "Using fallback price" : null,
           })
+        }
+
+        // Retry with exponential backoff
+        if (retryCount < MAX_RETRIES && isMounted) {
+          retryCount++
+          const delay = Math.min(1000 * Math.pow(2, retryCount), 10000)
+          setTimeout(() => {
+            if (isMounted) fetchCurrentPrice()
+          }, delay)
         }
       }
     }
@@ -60,7 +89,10 @@ export function useCurrentPrice() {
     fetchCurrentPrice()
     
     // Refresh every 2 minutes
-    const interval = setInterval(fetchCurrentPrice, 120000)
+    const interval = setInterval(() => {
+      retryCount = 0 // Reset retry count for scheduled fetches
+      fetchCurrentPrice()
+    }, 120000)
 
     return () => {
       isMounted = false

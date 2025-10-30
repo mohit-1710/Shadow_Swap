@@ -2,7 +2,7 @@
  * ShadowSwap Client - Unified interface for interacting with the ShadowSwap program
  */
 
-import { Connection, PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY } from '@solana/web3.js';
+import { Connection, PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY, SendTransactionError } from '@solana/web3.js';
 import { AnchorProvider, BN, Program, Idl } from '@coral-xyz/anchor';
 import { 
   TOKEN_PROGRAM_ID, 
@@ -101,12 +101,24 @@ export class ShadowSwapClient {
 
       const { side, amount, price } = params;
 
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📝 SUBMIT ORDER - Input Parameters:');
+      console.log('   Side:', side);
+      console.log('   Amount (UI):', amount);
+      console.log('   Price (UI):', price);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
       // Convert to lamports/micro units
       const amountLamports = side === 'buy' 
         ? Math.floor(amount * Math.pow(10, QUOTE_DECIMALS)) // USDC amount for buy
         : Math.floor(amount * Math.pow(10, BASE_DECIMALS));  // SOL amount for sell
       
       const priceLamports = Math.floor(price * Math.pow(10, QUOTE_DECIMALS));
+
+      console.log('💰 Converted Amounts:');
+      console.log('   Amount (lamports):', amountLamports, `(${amountLamports / 1e9} SOL or ${amountLamports / 1e6} USDC)`);
+      console.log('   Price (lamports):', priceLamports, `(${priceLamports / 1e6} USDC)`);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 
       // Create plain order
       const plainOrder: PlainOrder = {
@@ -155,6 +167,14 @@ export class ShadowSwapClient {
       if (side === 'sell') {
         // Add wrap SOL instruction
         const wrapAmount = BigInt(amountLamports) + BigInt(2_039_280); // Add rent for token account
+        
+        console.log('🔄 Wrapping SOL:');
+        console.log('   User Token Account:', userTokenAccount.toString());
+        console.log('   Amount to wrap:', amountLamports, 'lamports');
+        console.log('   Rent reserve:', 2_039_280, 'lamports');
+        console.log('   Total wrap amount:', Number(wrapAmount), 'lamports', `(${Number(wrapAmount) / 1e9} SOL)`);
+        console.log('   From wallet:', this.provider.publicKey.toString());
+        
         transaction.add(
           SystemProgram.transfer({
             fromPubkey: this.provider.publicKey,
@@ -163,6 +183,8 @@ export class ShadowSwapClient {
           })
         );
         transaction.add(createSyncNativeInstruction(userTokenAccount));
+        
+        console.log('✅ Wrap instructions added to transaction');
       }
 
       // Prepare cipher payload and encrypted amount buffers
@@ -177,6 +199,14 @@ export class ShadowSwapClient {
       const encryptedAmountBuffer = Buffer.alloc(64);
       const amountBytes = Buffer.from(amountLamports.toString(), 'utf-8');
       amountBytes.copy(encryptedAmountBuffer, 0, 0, Math.min(amountBytes.length, 64));
+
+      console.log('📤 Building submit order instruction:');
+      console.log('   Order PDA:', orderPda.toString());
+      console.log('   Escrow PDA:', escrowPda.toString());
+      console.log('   Escrow Token Account:', escrowTokenPda.toString());
+      console.log('   User Token Account:', userTokenAccount.toString());
+      console.log('   Token Mint:', tokenMint.toString());
+      console.log('   Owner:', this.provider.publicKey.toString());
 
       // Build submit order instruction
       const submitOrderIx = await this.program.methods
@@ -196,26 +226,78 @@ export class ShadowSwapClient {
         .instruction();
 
       transaction.add(submitOrderIx);
+      
+      console.log('✅ Submit order instruction added');
+      console.log('📦 Total instructions in transaction:', transaction.instructions.length);
 
-      // Send transaction
-      const signature = await this.provider.sendAndConfirm(transaction);
+      // Manually handle blockhash, signing, and confirmation to prevent stale transactions
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = this.provider.publicKey;
 
+      const signedTx = await this.provider.wallet.signTransaction(transaction);
+      const signature = await this.connection.sendRawTransaction(signedTx.serialize());
+
+      await this.connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      }, 'confirmed');
+
+      console.log('Order submitted successfully with signature:', signature);
       return { success: true, signature };
     } catch (error: any) {
       console.error('Error submitting order:', error);
+
+      if (error instanceof SendTransactionError) {
+        console.error('Transaction Logs:', error.logs);
+      }
       
-      // If transaction already processed, treat as success
-      if (error.message?.includes('already been processed') || error.message?.includes('AlreadyProcessed')) {
-        console.log('Transaction already processed - order was successfully submitted');
+      // Handle user rejection gracefully
+      if (error.message?.includes('User rejected') || error.name === 'WalletSignTransactionError') {
+        console.log('User cancelled transaction signing');
+        return { 
+          success: false, 
+          error: 'Transaction cancelled by user' 
+        };
+      }
+      
+      // If transaction already processed, treat as success (avoid duplicate submissions)
+      if (error.message?.includes('already been processed') || 
+          error.message?.includes('AlreadyProcessed') ||
+          error.message?.includes('This transaction has already been processed')) {
+        console.log('⚠️ Transaction already processed - order was successfully submitted');
+        
+        // Try to extract signature from error if available
+        const sig = error.signature || error.txid || 'processed';
         return { 
           success: true, 
-          signature: 'already-processed' 
+          signature: sig
         };
+      }
+      
+      // Return meaningful error message
+      let errorMessage = 'Failed to submit order';
+      
+      // Check for insufficient funds
+      if (error.message?.includes('insufficient lamports') || error.message?.includes('insufficient funds')) {
+        const match = error.message.match(/insufficient lamports (\d+), need (\d+)/);
+        if (match) {
+          const have = (parseInt(match[1]) / 1e9).toFixed(4);
+          const need = (parseInt(match[2]) / 1e9).toFixed(4);
+          errorMessage = `Insufficient balance. You have ${have} SOL but need ${need} SOL (including transaction fees and rent).`;
+        } else {
+          errorMessage = 'Insufficient balance. Please reduce the amount or add more SOL to your wallet.';
+        }
+      } else if (error.message?.includes('Simulation failed')) {
+        errorMessage = 'Transaction simulation failed. Please try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
       }
       
       return { 
         success: false, 
-        error: error.message || 'Failed to submit order' 
+        error: errorMessage
       };
     }
   }
@@ -259,24 +341,18 @@ export class ShadowSwapClient {
   async getBalances(): Promise<BalanceData> {
     try {
       if (!this.provider.publicKey) {
+        console.error('❌ No public key available for balance check');
         return { sol: 0, usdc: 0 };
       }
+
+      console.log('💰 Fetching balances for:', this.provider.publicKey.toString());
 
       // Get SOL balance
       const solBalance = await this.connection.getBalance(this.provider.publicKey);
       const sol = solBalance / Math.pow(10, BASE_DECIMALS);
+      console.log('   Native SOL balance:', sol, 'SOL');
 
-      // Get WSOL balance
-      const wsolAta = await getOrCreateAssociatedTokenAccount(
-        this.connection,
-        this.baseMint,
-        this.provider.publicKey,
-        this.provider.publicKey
-      );
-      const wsolBalance = await getTokenBalance(this.connection, wsolAta);
-      const wsol = Number(wsolBalance) / Math.pow(10, BASE_DECIMALS);
-
-      // Get USDC balance
+      // Get USDC balance (WSOL is temporary and shouldn't be in total)
       const usdcAta = await getOrCreateAssociatedTokenAccount(
         this.connection,
         this.quoteMint,
@@ -285,13 +361,16 @@ export class ShadowSwapClient {
       );
       const usdcBalance = await getTokenBalance(this.connection, usdcAta);
       const usdc = Number(usdcBalance) / Math.pow(10, QUOTE_DECIMALS);
+      console.log('   USDC balance:', usdc, 'USDC');
+
+      console.log('✅ Final balances - SOL:', sol, 'USDC:', usdc);
 
       return { 
-        sol: sol + wsol, // Combine native SOL + wrapped SOL
+        sol: sol, // Only show native SOL
         usdc 
       };
     } catch (error) {
-      console.error('Error fetching balances:', error);
+      console.error('❌ Error fetching balances:', error);
       return { sol: 0, usdc: 0 };
     }
   }
@@ -376,6 +455,7 @@ export class ShadowSwapClient {
 
       // If refunding wSOL, add instruction to close the wSOL account and recover rent
       if (tokenMint.equals(NATIVE_MINT)) {
+        console.log('Adding instruction to close WSOL account');
         const closeWsolIx = createCloseAccountInstruction(
           userTokenAccount,
           this.provider.publicKey,
@@ -384,13 +464,38 @@ export class ShadowSwapClient {
         transaction.add(closeWsolIx);
       }
 
-      const signature = await this.provider.sendAndConfirm(transaction);
+      // Manually handle blockhash, signing, and confirmation
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = this.provider.publicKey;
+
+      const signedTx = await this.provider.wallet.signTransaction(transaction);
+      const signature = await this.connection.sendRawTransaction(signedTx.serialize());
+
+      await this.connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      }, 'confirmed');
 
       console.log('Order cancelled successfully:', signature);
 
       return { success: true, signature };
     } catch (error: any) {
       console.error('Error cancelling order:', error);
+      
+      if (error instanceof SendTransactionError) {
+        console.error('Transaction Logs:', error.logs);
+      }
+
+      // Handle user rejection gracefully
+      if (error.message?.includes('User rejected') || error.name === 'WalletSignTransactionError') {
+        console.log('User cancelled transaction signing');
+        return { 
+          success: false, 
+          error: 'Cancellation cancelled by user' 
+        };
+      }
       
       // Check for specific error codes
       if (error.message?.includes('InvalidOrderStatus')) {
@@ -400,18 +505,28 @@ export class ShadowSwapClient {
         };
       }
       
-      // If transaction already processed, treat as success
-      if (error.message?.includes('already been processed') || error.message?.includes('AlreadyProcessed')) {
-        console.log('Transaction already processed - order was successfully cancelled');
+      // If transaction already processed, treat as success (avoid showing error)
+      if (error.message?.includes('already been processed') || 
+          error.message?.includes('AlreadyProcessed') ||
+          error.message?.includes('This transaction has already been processed')) {
+        console.log('⚠️ Transaction already processed - order was successfully cancelled');
         return { 
           success: true, 
           signature: 'already-processed' 
         };
       }
       
+      // Return meaningful error message
+      let errorMessage = 'Failed to cancel order';
+      if (error.message?.includes('Simulation failed')) {
+        errorMessage = 'Cancellation failed. Please refresh and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       return { 
         success: false, 
-        error: error.message || 'Failed to cancel order' 
+        error: errorMessage
       };
     }
   }

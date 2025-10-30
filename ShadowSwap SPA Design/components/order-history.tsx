@@ -194,14 +194,7 @@ export function OrderHistory() {
                           className="text-red-400 hover:text-red-300 hover:bg-red-500/10 disabled:opacity-50 disabled:cursor-not-allowed"
                           title="Cancel this order"
                         >
-                          {cancellingOrderId === order.publicKey ? (
-                            <>
-                              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
-                              Cancelling...
-                            </>
-                          ) : (
-                            'Cancel'
-                          )}
+                          {cancellingOrderId === order.publicKey ? 'Cancelling' : 'Cancel'}
                         </Button>
                       ) : order.status === ORDER_STATUS.MATCHED_PENDING ? (
                         <span className="text-yellow-400 text-xs" title="Order is being matched">Processing...</span>
