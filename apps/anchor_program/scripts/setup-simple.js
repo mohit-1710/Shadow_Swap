@@ -7,7 +7,7 @@ const { PublicKey, SystemProgram } = require("@solana/web3.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
+const PROGRAM_ID = "CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA";
 const SOL_MINT = new PublicKey("So11111111111111111111111111111111111111112");
 const USDC_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 

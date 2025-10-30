@@ -72,7 +72,7 @@ graph LR
 - Test (against local validator): `yarn anchor:test`
 - Deploy to devnet: `SKIP_TESTS=1 anchor deploy` (or run via `yarn anchor:setup`)
 
-The program currently lives at `5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt`. Default order book PDAs (`FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8`) pair SOL (`So11111111111111111111111111111111111111112`) with Circle’s devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`).
+The program currently lives at `5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt`. Default order book PDAs (`63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ`) pair SOL (`So11111111111111111111111111111111111111112`) with Circle’s devnet USDC (`4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU`).
 
 ### Frontend (Next.js)
 - Dev server: `cd apps/frontend && yarn dev`

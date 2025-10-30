@@ -14,7 +14,7 @@ export default function TradePage() {
   useEffect(() => {
     // Check if wallet is connected on mount
     if (!isWalletConnected) {
-      toast.error("Please connect your wallet to access the trade page")
+      toast.error("Please connect your wallet to access the trade page", { dismissible: true })
       router.replace("/")
     }
   }, [isWalletConnected, router])

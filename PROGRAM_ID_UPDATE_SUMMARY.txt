@@ -1,0 +1,110 @@
+═══════════════════════════════════════════════════════════════
+  ✅ PROGRAM ID UPDATED - Ready to Deploy
+═══════════════════════════════════════════════════════════════
+
+OLD Program ID: 5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
+NEW Program ID: CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA
+
+═══════════════════════════════════════════════════════════════
+
+✅ FILES UPDATED (11 files):
+═══════════════════════════════════════════════════════════════
+
+Backend:
+  ✅ apps/anchor_program/programs/shadow_swap/src/lib.rs
+  ✅ apps/anchor_program/Anchor.toml
+  ✅ apps/anchor_program/scripts/setup-simple.js
+  ✅ apps/anchor_program/scripts/view-orderbook.js
+  ✅ apps/settlement_bot/src/index.ts
+
+Frontend:
+  ✅ ShadowSwap SPA Design/.env.local
+  ✅ apps/frontend/env.example
+  ✅ apps/frontend/pages/index.tsx
+
+Config:
+  ✅ env.example
+  ✅ DEPLOYMENT_GUIDE.md (NEW - read this!)
+  ✅ This summary file
+
+═══════════════════════════════════════════════════════════════
+
+⚠️ NEXT STEPS - DO THESE IN ORDER:
+═══════════════════════════════════════════════════════════════
+
+STEP 1: Move the Keypair
+────────────────────────────────────────────
+cd ~
+mv target/deploy/shadow_swap-keypair.json \
+   /Users/vansh/Coding/Shadow_Swap/apps/anchor_program/target/deploy/
+
+STEP 2: Build the Program
+────────────────────────────────────────────
+cd /Users/vansh/Coding/Shadow_Swap/apps/anchor_program
+anchor clean
+anchor build
+
+STEP 3: Deploy to Devnet
+────────────────────────────────────────────
+anchor deploy
+
+Expected output:
+  Program Id: CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA
+  Deploy success
+
+STEP 4: Initialize OrderBook
+────────────────────────────────────────────
+node scripts/setup-simple.js
+
+This will print the OrderBook address - SAVE IT!
+
+STEP 5: Update OrderBook Address
+────────────────────────────────────────────
+Tell me the OrderBook address and I'll update:
+- env.example
+- ShadowSwap SPA Design/.env.local
+
+STEP 6: Copy New IDL to Frontend
+────────────────────────────────────────────
+cp target/idl/shadow_swap.json \
+   "../../ShadowSwap SPA Design/lib/idl/shadow_swap.json"
+
+STEP 7: Test!
+────────────────────────────────────────────
+cd "../../ShadowSwap SPA Design"
+pnpm dev
+
+Then try submitting an order!
+
+═══════════════════════════════════════════════════════════════
+
+📚 DETAILED GUIDE:
+═══════════════════════════════════════════════════════════════
+
+For complete step-by-step instructions with troubleshooting:
+👉 Read: DEPLOYMENT_GUIDE.md
+
+═══════════════════════════════════════════════════════════════
+
+🎯 QUICK REFERENCE:
+═══════════════════════════════════════════════════════════════
+
+New Program ID: CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA
+Keypair Location: ~/target/deploy/shadow_swap-keypair.json
+Seed Phrase: split inherit file hover nose fitness elevator long exist extend adult imitate
+
+⚠️  Keep the seed phrase safe! (Devnet testing only)
+
+═══════════════════════════════════════════════════════════════
+
+💡 TIPS:
+═══════════════════════════════════════════════════════════════
+
+- Make sure you have enough SOL for deployment (~2-5 SOL)
+- Get SOL from: https://faucet.solana.com
+- Verify deployment: solana program show CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA
+
+═══════════════════════════════════════════════════════════════
+
+Ready to deploy? Start with STEP 1 above!
+

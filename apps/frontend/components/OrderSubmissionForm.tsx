@@ -195,10 +195,8 @@ export default function OrderSubmissionForm({
       const orderCount = orderBookAccount.orderCount as BN;
 
       // Derive PDAs
-      const orderCountBuffer = Buffer.alloc(8);
-      // Convert Anchor BN to native BigInt for buffer writing
-      const orderCountBigInt = BigInt(orderCount.toString());
-      orderCountBuffer.writeBigUInt64LE(orderCountBigInt);
+      // Use BN's toArrayLike method for better browser compatibility
+      const orderCountBuffer = orderCount.toArrayLike(Buffer, 'le', 8);
 
       const [orderPda] = PublicKey.findProgramAddressSync(
         [
@@ -315,8 +313,10 @@ export default function OrderSubmissionForm({
 
       // Create encrypted_amount (64 bytes to match MAX_ENCRYPTED_AMOUNT_SIZE)
       const encryptedAmountBuffer = Buffer.alloc(64);
-      // For now, just encode the amount in the first 8 bytes
-      encryptedAmountBuffer.writeBigUInt64LE(amountBigInt, 0);
+      // For now, just encode the amount in the first 8 bytes using BN for browser compatibility
+      const amountBN = new BN(amountBigInt.toString());
+      const amountBytes = amountBN.toArrayLike(Buffer, 'le', 8);
+      encryptedAmountBuffer.set(amountBytes, 0);
       // Fill rest with random data (simulating encryption)
       if (typeof window !== 'undefined' && window.crypto) {
         const randomPadding = new Uint8Array(56);

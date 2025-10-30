@@ -689,7 +689,7 @@ Transaction {
 📍 Configuration:
    RPC URL:        https://api.devnet.solana.com
    Program ID:     5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
-   Order Book:     FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8
+   Order Book:     63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ
    Keeper Wallet:  <keeper_pubkey>
    Match Interval: 10000ms
 
@@ -1172,7 +1172,7 @@ SHADOWSWAP_PROGRAM_ID=5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
 RPC_URL=https://api.devnet.solana.com
 WSS_URL=wss://api.devnet.solana.com
 PROGRAM_ID=5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt
-ORDER_BOOK_PUBKEY=FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8
+ORDER_BOOK_PUBKEY=63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ
 
 # Keeper
 KEEPER_KEYPAIR_PATH=~/.config/solana/id.json
@@ -1204,7 +1204,7 @@ LOG_LEVEL=info
 
 | Account | Seeds | Example |
 |---------|-------|---------|
-| OrderBook | `['order_book', base_mint, quote_mint]` | `FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8` |
+| OrderBook | `['order_book', base_mint, quote_mint]` | `63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ` |
 | EncryptedOrder | `['order', order_book, order_count (u64 LE)]` | `<order_pda>` |
 | Escrow | `['escrow', order]` | `<escrow_pda>` |
 | EscrowTokenAccount | `['escrow_token', order]` | `<token_account_pda>` |

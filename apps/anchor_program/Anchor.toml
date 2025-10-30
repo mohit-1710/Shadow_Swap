@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-shadow_swap = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt"
+shadow_swap = "CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA"
 
 [programs.devnet]
-shadow_swap = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt"
+shadow_swap = "CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA"
 
 [registry]
 url = "https://api.apr.dev"

@@ -11,7 +11,7 @@ const WalletMultiButton = dynamic(
 
 // Program configuration (deployed on devnet - Phase 4)
 const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt'
+  process.env.NEXT_PUBLIC_PROGRAM_ID || 'CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA'
 );
 const BASE_MINT = new PublicKey(
   process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112'

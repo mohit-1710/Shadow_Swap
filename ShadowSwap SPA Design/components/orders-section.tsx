@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
-import { X, Search } from "lucide-react"
+import { X, Search, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import Image from "next/image"
+import { getPoolStats, getMockPools, type PoolStats } from "@/lib/pools/getPoolStats"
 
 /* OLD ORDER BOOK DATA - COMMENTED OUT
 const mockOrders = [
@@ -53,116 +54,53 @@ const mockOrders = [
 ]
 */
 
-// NEW LIQUIDITY POOLS DATA
-const mockPools = [
-  {
-    id: "1",
-    tokenA: "SOL",
-    tokenB: "USDC",
-    liquidity: "$2.4M",
-    volume24h: "$850K",
-    fees24h: "$2.5K",
-    apr24h: "12.5%",
-    active: true,
-  },
-  {
-    id: "2",
-    tokenA: "ETH",
-    tokenB: "BTC",
-    liquidity: "$1.8M",
-    volume24h: "$620K",
-    fees24h: "$1.8K",
-    apr24h: "10.2%",
-    active: false,
-  },
-  {
-    id: "3",
-    tokenA: "JitoSOL",
-    tokenB: "USDC",
-    liquidity: "$2.1M",
-    volume24h: "$780K",
-    fees24h: "$2.3K",
-    apr24h: "13.7%",
-    active: false,
-  },
-  {
-    id: "4",
-    tokenA: "TRUMP",
-    tokenB: "USDT",
-    liquidity: "$950K",
-    volume24h: "$380K",
-    fees24h: "$1.1K",
-    apr24h: "8.7%",
-    active: false,
-  },
-  {
-    id: "5",
-    tokenA: "BONK",
-    tokenB: "SOL",
-    liquidity: "$680K",
-    volume24h: "$210K",
-    fees24h: "$630",
-    apr24h: "6.5%",
-    active: false,
-  },
-  {
-    id: "6",
-    tokenA: "MET",
-    tokenB: "USDC",
-    liquidity: "$420K",
-    volume24h: "$125K",
-    fees24h: "$375",
-    apr24h: "5.2%",
-    active: false,
-  },
-  {
-    id: "7",
-    tokenA: "PAYAI",
-    tokenB: "ETH",
-    liquidity: "$310K",
-    volume24h: "$95K",
-    fees24h: "$285",
-    apr24h: "4.8%",
-    active: false,
-  },
-  {
-    id: "8",
-    tokenA: "PUMP",
-    tokenB: "JLP",
-    liquidity: "$890K",
-    volume24h: "$320K",
-    fees24h: "$960",
-    apr24h: "7.9%",
-    active: false,
-  },
-  {
-    id: "9",
-    tokenA: "JLP",
-    tokenB: "USDC",
-    liquidity: "$1.5M",
-    volume24h: "$540K",
-    fees24h: "$1.6K",
-    apr24h: "11.3%",
-    active: false,
-  },
-  {
-    id: "10",
-    tokenA: "BTC",
-    tokenB: "USDT",
-    liquidity: "$3.2M",
-    volume24h: "$1.1M",
-    fees24h: "$3.3K",
-    apr24h: "14.8%",
-    active: false,
-  },
-]
-
 export function OrdersSection() {
   const router = useRouter()
   const [searchQuery, setSearchQuery] = useState("")
+  const [pools, setPools] = useState<PoolStats[]>([])
+  const [isLoadingPools, setIsLoadingPools] = useState(true)
+
+  // Fetch real pool data on mount
+  useEffect(() => {
+    async function fetchPools() {
+      setIsLoadingPools(true)
+      try {
+        // Fetch real SOL/USDC pool data
+        const solUsdcPool = await getPoolStats()
+        
+        // Get mock data for other pools
+        const otherPools = getMockPools()
+        
+        // Combine real and mock data
+        setPools([solUsdcPool, ...otherPools])
+      } catch (error) {
+        console.error('Error fetching pool data:', error)
+        // Fallback to all mock data if API fails
+        const fallbackPool = {
+          id: "1",
+          tokenA: "SOL",
+          tokenB: "USDC",
+          liquidity: "$2.4M",
+          volume24h: "$850K",
+          fees24h: "$2.5K",
+          apr24h: "12.5%",
+          active: true,
+        }
+        setPools([fallbackPool, ...getMockPools()])
+      } finally {
+        setIsLoadingPools(false)
+      }
+    }
+
+    fetchPools()
+
+    // Refresh pool data every 60 seconds
+    const interval = setInterval(fetchPools, 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   // Filter pools based on search query
-  const filteredPools = mockPools.filter((pool) => {
+  const filteredPools = pools.filter((pool) => {
     if (!searchQuery) return true // Show all pools when search is empty
     const query = searchQuery.toLowerCase()
     return (
@@ -172,20 +110,20 @@ export function OrdersSection() {
   })
 
   // Determine if a pool should be clickable/active
-  const isPoolActive = (pool: typeof mockPools[0]) => {
+  const isPoolActive = (pool: PoolStats) => {
     // When searching, all matched pools become active
     if (searchQuery) return true
     // When not searching, only SOL/USDC is active
     return pool.active
   }
 
-  const handleRowClick = (pool: typeof mockPools[0]) => {
+  const handleRowClick = (pool: PoolStats) => {
     if (isPoolActive(pool)) {
       router.push(`/trade?from=${pool.tokenA}&to=${pool.tokenB}`)
     }
   }
 
-  const handleTradeClick = (e: React.MouseEvent, pool: typeof mockPools[0]) => {
+  const handleTradeClick = (e: React.MouseEvent, pool: PoolStats) => {
     e.stopPropagation()
     router.push(`/trade?from=${pool.tokenA}&to=${pool.tokenB}`)
   }
@@ -328,7 +266,16 @@ export function OrdersSection() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredPools.length === 0 ? (
+                  {isLoadingPools ? (
+                    <tr>
+                      <td colSpan={6} className="py-12 text-center">
+                        <div className="flex flex-col items-center gap-3">
+                          <Loader2 className="w-8 h-8 animate-spin text-purple-400" />
+                          <span className="text-white/60">Loading pool data...</span>
+                        </div>
+                      </td>
+                    </tr>
+                  ) : filteredPools.length === 0 ? (
                     <tr>
                       <td colSpan={6} className="py-8 text-center text-white/60">
                         No pools found matching &quot;{searchQuery}&quot;
