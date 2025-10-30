@@ -10,6 +10,13 @@ import { useWallet } from "@/contexts/WalletContext"
 import { useShadowSwap } from "@/hooks/useShadowSwap"
 import { useCurrentPrice } from "@/hooks/useCurrentPrice"
 import { toast } from "sonner"
+import { Connection, PublicKey } from "@solana/web3.js"
+import { 
+  getPublicLiquidityQuote, 
+  getPublicLiquiditySwapTx, 
+  executePublicLiquiditySwap, 
+  getTokenMintForJupiter 
+} from "@/lib/jupiter"
 
 // All available tokens for selection (only tokens with icons from liquidity pool)
 const ALL_TOKENS = [
@@ -67,7 +74,7 @@ const TokenIcon = ({ token }: { token: string }) => {
 
 export function TradeSection() {
   // Wallet and backend integration
-  const { isWalletConnected, walletAddress, connectWallet } = useWallet()
+  const { isWalletConnected, walletAddress, connectWallet, wallet } = useWallet()
   const { submitOrder, getBalances, isLoading, error } = useShadowSwap()
   
   // Get real-time SOL price
@@ -80,7 +87,10 @@ export function TradeSection() {
   const [limitPrice, setLimitPrice] = useState("")
   const [orderType, setOrderType] = useState<"limit" | "market">("limit")
   const [allowLiquidityPool, setAllowLiquidityPool] = useState(false)
-  const [daysToKeepOpen, setDaysToKeepOpen] = useState("7") // Default 7 days
+  const [daysToKeepOpen, setDaysToKeepOpen] = useState("7") // Default 7 days (used when fallback is OFF)
+  const [fallbackSeconds, setFallbackSeconds] = useState("10") // Default 10 seconds when fallback is ON
+  const [isFallbackCountdown, setIsFallbackCountdown] = useState(false)
+  const [fallbackCountdown, setFallbackCountdown] = useState(10)
   
   // Balance state
   const [solBalance, setSolBalance] = useState(0)
@@ -99,6 +109,7 @@ export function TradeSection() {
   const fromDropdownRef = useRef<HTMLDivElement>(null)
   const toDropdownRef = useRef<HTMLDivElement>(null)
   const daysDropdownRef = useRef<HTMLDivElement>(null)
+  const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com"
 
   // Load balances when wallet connects or client initializes
   useEffect(() => {
@@ -270,21 +281,72 @@ export function TradeSection() {
       toast.dismiss(loadingToast)
       
       if (result.success) {
-        toast.success(
-          <div>
-            <p className="font-semibold">Order submitted successfully!</p>
-            <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
-          </div>,
-          { dismissible: true }
-        )
-        
-        // Reset form
-        setFromAmount("")
-        setToAmount("")
-        setLimitPrice("")
-        
-        // Refresh balances
-        loadBalances()
+        // Start fallback countdown if enabled
+        if (allowLiquidityPool) {
+          const secs = parseInt(fallbackSeconds || "10", 10)
+          setIsFallbackCountdown(true)
+          setFallbackCountdown(secs)
+
+          // Periodic 1-second countdown
+          const countdownInterval = setInterval(() => {
+            setFallbackCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownInterval)
+                return 0
+              }
+              return prev - 1
+            })
+          }, 1000)
+
+          // Execute fallback after selected seconds
+          setTimeout(async () => {
+            console.log("🔄 Fallback triggered - no private match found in", secs, "seconds")
+            setIsFallbackCountdown(false)
+            try {
+              // Only attempt Jupiter swap on mainnet
+              const isMainnet = RPC_URL.includes("mainnet")
+              if (!isMainnet) {
+                console.warn("⚠️ Fallback mode triggered, but Jupiter API only works on mainnet")
+                toast.warning("Fallback triggered: Public liquidity network available only on mainnet. Order remains in private orderbook.")
+                toast.info("Liquidity pool request cannot be executed on Devnet. Your order has been added to the private orderbook and will be matched when possible.")
+              } else {
+                await executeFallbackSwap()
+              }
+            } catch (e: any) {
+              console.error("❌ Fallback swap error:", e)
+              const msg = e?.message || "Fallback swap failed. Your order remains in the private orderbook."
+              if (/Failed to fetch/i.test(msg)) {
+                toast.warning("Public liquidity network unavailable. Your order remains in orderbook.")
+              } else if (/User rejected|User canceled|WalletSignTransactionError/i.test(msg)) {
+                toast.info("Fallback swap cancelled")
+              } else if (/No routes/i.test(msg)) {
+                toast.warning("No liquidity routes found for this pair")
+              } else {
+                toast.error(msg)
+              }
+            } finally {
+              // Reset form after fallback completes/handles
+              setFromAmount("")
+              setToAmount("")
+              setLimitPrice("")
+              loadBalances()
+            }
+          }, secs * 1000)
+        } else {
+          // No fallback → simple success
+          toast.success(
+            <div>
+              <p className="font-semibold">Order submitted successfully!</p>
+              <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
+            </div>,
+            { dismissible: true }
+          )
+          // Reset form
+          setFromAmount("")
+          setToAmount("")
+          setLimitPrice("")
+          loadBalances()
+        }
       } else {
         toast.error(`Order failed: ${result.error}`, { dismissible: true })
       }
@@ -293,6 +355,45 @@ export function TradeSection() {
       toast.error(err.message || "Failed to submit order", { dismissible: true })
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  // Execute fallback swap through Jupiter (MAINNET only)
+  const executeFallbackSwap = async () => {
+    try {
+      if (!wallet?.publicKey || !wallet?.signTransaction) {
+        throw new Error("Wallet not available for fallback swap")
+      }
+
+      // Determine swap direction and amount in minor units
+      const inputSymbol = fromToken
+      const outputSymbol = toToken
+      const decimals = inputSymbol === 'SOL' ? 9 : 6
+      const amountIn = parseFloat(fromAmount || '0')
+      if (!amountIn || amountIn <= 0) throw new Error('Invalid amount for fallback swap')
+
+      const inputMint = getTokenMintForJupiter(inputSymbol)
+      const outputMint = getTokenMintForJupiter(outputSymbol)
+      const minorAmount = toMinorUnits(amountIn, decimals)
+
+      console.log('📊 Getting quote from public liquidity network...')
+      const quote = await getPublicLiquidityQuote(inputMint, outputMint, minorAmount)
+
+      console.log('✍️ Requesting swap transaction (fallback) ...')
+      const base64Tx = await getPublicLiquiditySwapTx(quote, wallet.publicKey as PublicKey)
+
+      const connection = new Connection(RPC_URL, 'confirmed')
+      const txid = await executePublicLiquiditySwap(base64Tx, wallet, connection)
+
+      toast.success(
+        <div>
+          <p className="font-semibold">Order executed via public liquidity network</p>
+          <p className="text-xs mt-1">Tx: {txid.slice(0, 8)}...</p>
+        </div>
+      )
+      console.log('✅ Fallback swap executed successfully:', txid)
+    } catch (e: any) {
+      throw e
     }
   }
 
@@ -313,15 +414,25 @@ export function TradeSection() {
                 <CardTitle className="text-lg sm:text-xl">Place Order</CardTitle>
                 */}
                 
-                {/* New: Title with LP Fallback Toggle */}
+                {/* New: Title with Fallback Toggle */}
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg sm:text-xl">Place Order</CardTitle>
                   
-                  {/* Liquidity Pool Fallback Toggle */}
+                  {/* Fallback Toggle */}
                   <div className="relative group">
                     <div className="relative overflow-hidden">
                       <button
-                        onClick={() => setAllowLiquidityPool(!allowLiquidityPool)}
+                        onClick={() => {
+                          const next = !allowLiquidityPool
+                          setAllowLiquidityPool(next)
+                          if (next) {
+                            const isMainnet = RPC_URL.includes("mainnet")
+                            if (!isMainnet) {
+                              toast.warning("Liquidity pool fallback is unavailable on devnet. Your order will remain in the private orderbook.")
+                              toast.info("On mainnet, fallback will execute via public liquidity as planned.")
+                            }
+                          }
+                        }}
                         className={`relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
                           allowLiquidityPool
                             ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
@@ -335,7 +446,7 @@ export function TradeSection() {
                             <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
                           )}
                         </div>
-                        <span>LP Fallback</span>
+                        <span>Fallback{isFallbackCountdown ? ` (${fallbackCountdown}s)` : ''}</span>
                       </button>
                       {/* Animated lines - same as connect wallet button */}
                       {!allowLiquidityPool && (
@@ -347,22 +458,27 @@ export function TradeSection() {
                     </div>
 
                     {/* Tooltip - positioned above button */}
-                    <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+                    <div className="absolute bottom-full right-0 mb-2 w-72 p-3 bg-gradient-to-b from-black/95 to-purple-950/30 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none shadow-purple-500/10">
                       <p className="text-xs text-white/80 leading-relaxed">
-                        Enable this to allow your order to execute through liquidity pools if no direct orderbook match is found. 
-                        <span className="text-purple-400 font-medium"> Note:</span> This may reduce privacy guarantees but ensures order execution.
+                        Enable to allow a direct swap on the public Solana liquidity network if no private match is found.
+                        The system will first try to match your order <span className="text-purple-400 font-medium">privately</span>,
+                        then wait <span className="text-purple-400 font-bold">{fallbackSeconds}s</span> before routing to a liquidity pool.
                       </p>
                     </div>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* LP Fallback Warning */}
+                {/* Fallback Banner / Warning */}
                 {allowLiquidityPool && (
                   <div className="bg-purple-500/10 border border-purple-400/30 rounded-lg p-3">
                     <p className="text-xs text-purple-400 flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      <span>Liquidity pool fallback enabled - order may execute with reduced privacy</span>
+                      <span>
+                        {isFallbackCountdown
+                          ? `Private matching… (${fallbackCountdown}s)`
+                          : 'Fallback enabled — order may execute via liquidity pool if not matched privately'}
+                      </span>
                     </p>
                   </div>
                 )}
@@ -622,11 +738,11 @@ export function TradeSection() {
                       : !isWalletConnected 
                       ? "Connect Wallet to Trade" 
                       : orderType === "limit" 
-                      ? "Place Limit Order" 
-                      : "Execute Market Order"}
+                      ? (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Place Limit Order")
+                      : (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Execute Market Order")}
                   </Button>
 
-                  {/* Days Dropdown - Only for Limit Orders */}
+                  {/* Expiration/Delay Dropdown - Only for Limit Orders */}
                   {orderType === "limit" && (
                     <div className="relative" ref={daysDropdownRef}>
                       <button
@@ -638,44 +754,72 @@ export function TradeSection() {
                         className="h-full flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 border border-white/20 rounded-md text-white transition-colors whitespace-nowrap"
                       >
                         <span className="text-xs font-medium">
-                          {daysToKeepOpen === "0" 
-                            ? "∞" 
-                            : `${daysToKeepOpen}d`
+                          {allowLiquidityPool
+                            ? `${fallbackSeconds}s`
+                            : (daysToKeepOpen === "0" ? "∞" : `${daysToKeepOpen}d`)
                           }
                         </span>
                         <ChevronDown className="w-3 h-3" />
                       </button>
 
                       {showDaysDropdown && (
-                        <div className="absolute bottom-full right-0 mb-2 w-40 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[200]">
+                        <div className="absolute bottom-full right-0 mb-2 w-44 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[200]">
                           <div className="py-0.5">
-                            {[
-                              { value: "1", label: "1 Day" },
-                              { value: "3", label: "3 Days" },
-                              { value: "7", label: "7 Days" },
-                              { value: "14", label: "14 Days" },
-                              { value: "30", label: "30 Days" },
-                              { value: "90", label: "90 Days" },
-                              { value: "0", label: "Until Cancelled" },
-                            ].map((option) => (
-                              <button
-                                key={option.value}
-                                onClick={() => {
-                                  setDaysToKeepOpen(option.value)
-                                  setShowDaysDropdown(false)
-                                }}
-                                className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
-                                  daysToKeepOpen === option.value ? "bg-purple-500/20" : ""
-                                }`}
-                              >
-                                <span className="text-white text-xs">{option.label}</span>
-                                {daysToKeepOpen === option.value && (
-                                  <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                  </svg>
-                                )}
-                              </button>
-                            ))}
+                            {allowLiquidityPool
+                              ? [
+                                  { value: "5", label: "5 Seconds" },
+                                  { value: "10", label: "10 Seconds" },
+                                  { value: "20", label: "20 Seconds" },
+                                  { value: "30", label: "30 Seconds" },
+                                  { value: "45", label: "45 Seconds" },
+                                  { value: "60", label: "60 Seconds" },
+                                  { value: "90", label: "90 Seconds" },
+                                ].map((option) => (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => {
+                                      setFallbackSeconds(option.value)
+                                      setShowDaysDropdown(false)
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
+                                      fallbackSeconds === option.value ? "bg-purple-500/20" : ""
+                                    }`}
+                                  >
+                                    <span className="text-white text-xs">{option.label}</span>
+                                    {fallbackSeconds === option.value && (
+                                      <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))
+                              : [
+                                  { value: "1", label: "1 Day" },
+                                  { value: "3", label: "3 Days" },
+                                  { value: "7", label: "7 Days" },
+                                  { value: "14", label: "14 Days" },
+                                  { value: "30", label: "30 Days" },
+                                  { value: "90", label: "90 Days" },
+                                  { value: "0", label: "Until Cancelled" },
+                                ].map((option) => (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => {
+                                      setDaysToKeepOpen(option.value)
+                                      setShowDaysDropdown(false)
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
+                                      daysToKeepOpen === option.value ? "bg-purple-500/20" : ""
+                                    }`}
+                                  >
+                                    <span className="text-white text-xs">{option.label}</span>
+                                    {daysToKeepOpen === option.value && (
+                                      <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))}
                           </div>
                         </div>
                       )}
@@ -694,4 +838,9 @@ export function TradeSection() {
       </div>
     </section>
   )
+}
+
+// Helper to convert float to integer amount in minor units
+function toMinorUnits(amount: number, decimals: number): number {
+  return Math.floor(amount * Math.pow(10, decimals))
 }

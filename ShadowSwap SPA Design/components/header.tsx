@@ -14,6 +14,7 @@ export function Header() {
   const walletDropdownRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const pathname = usePathname()
+  const isDocs = pathname?.startsWith("/docs")
   const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
 
   // Close dropdown when clicking outside
@@ -130,7 +131,8 @@ export function Header() {
             ))}
           </nav>
           
-          {/* Connect Wallet Button */}
+          {/* Connect Wallet Button (hidden on docs) */}
+          {!isDocs && (
           <div className="relative" ref={walletDropdownRef}>
             <div className="relative overflow-hidden">
               <Button 
@@ -191,6 +193,7 @@ export function Header() {
               </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Mobile Menu Button */}
@@ -228,6 +231,7 @@ export function Header() {
                 </Link>
               )
             ))}
+            {!isDocs && (
             <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
               <div className="relative overflow-hidden">
                 <Button 
@@ -288,6 +292,7 @@ export function Header() {
                 </div>
               )}
             </div>
+            )}
           </nav>
         </div>
       )}

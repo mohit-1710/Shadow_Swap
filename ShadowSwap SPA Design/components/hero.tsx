@@ -55,7 +55,7 @@ export function Hero() {
             <div className="text-xs sm:text-sm text-white/50 mt-1">24h Volume</div>
           </div>
           <div>
-            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-purple-400">1,200+</div>
+            <div className="text-xl sm:text-2xl md:text-3xl font-bold text-purple-400">200+</div>
             <div className="text-xs sm:text-sm text-white/50 mt-1">Active Traders</div>
           </div>
           <div>
