@@ -119,6 +119,9 @@ export function OrderHistory() {
     )
   }
 
+  // Sort orders by latest createdAt (desc)
+  const sortedOrders = [...orders].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+
   return (
     <Card className="w-full">
       <CardHeader className="flex flex-row items-center justify-between">
@@ -141,9 +144,9 @@ export function OrderHistory() {
           </div>
         )}
 
-        <div className="overflow-x-auto -mx-2 sm:mx-0">
+        <div className="overflow-x-auto -mx-2 sm:mx-0 max-h-[480px] overflow-y-auto scrollbar-thin scrollbar-thumb-purple-500/50 scrollbar-track-transparent">
           <table className="w-full text-xs sm:text-sm min-w-[600px]">
-            <thead>
+            <thead className="sticky top-0 bg-black/95 backdrop-blur-md z-10">
               <tr className="border-b border-white/10">
                 <th className="text-left py-3 px-4 text-white/60 font-medium">Order ID</th>
                 <th className="text-left py-3 px-4 text-white/60 font-medium">Pair</th>
@@ -167,7 +170,7 @@ export function OrderHistory() {
                   </td>
                 </tr>
               ) : (
-                orders.map((order) => (
+                sortedOrders.map((order) => (
                   <tr 
                     key={order.publicKey}
                     className="border-b border-white/5 hover:bg-white/5 transition-colors"

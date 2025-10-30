@@ -48,6 +48,7 @@ pub mod shadow_swap {
         ctx: Context<SubmitEncryptedOrder>,
         cipher_payload: Vec<u8>,
         encrypted_amount: Vec<u8>,
+        posted_amount: u64,
     ) -> Result<()> {
         require!(
             ctx.accounts.order_book.is_active,
@@ -112,7 +113,7 @@ pub mod shadow_swap {
                     authority: ctx.accounts.owner.to_account_info(),
                 },
             ),
-            ctx.accounts.user_token_account.amount,
+            posted_amount,
         )?;
 
         msg!("Encrypted order submitted: ID {}", order_id);

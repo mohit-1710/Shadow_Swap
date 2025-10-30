@@ -48,13 +48,13 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
                 <span className="text-xs text-purple-400 font-mono">{codeBlockLanguage || 'code'}</span>
                 <button
                   onClick={() => copyToClipboard(codeText, codeId)}
-                  className="text-xs text-white/60 hover:text-white transition-colors flex items-center gap-1"
+                  className="text-xs text-white/70 hover:text-white transition-colors flex items-center gap-1 cursor-pointer"
                 >
                   {copiedCode === codeId ? '✓ Copied!' : 'Copy'}
                 </button>
               </div>
-              <pre className="bg-black/60 border border-white/10 rounded-lg p-4 overflow-x-auto">
-                <code className="text-sm text-white/80 font-mono leading-relaxed">
+              <pre className="rounded-xl p-4 md:p-5 overflow-x-auto bg-gradient-to-b from-[#0b0b12] to-[#0c0c18] border border-white/10 shadow-xl shadow-black/30 ring-1 ring-purple-500/10">
+                <code className="text-[13px] md:text-sm text-white/85 font-mono leading-relaxed">
                   {codeText}
                 </code>
               </pre>
@@ -202,22 +202,10 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         const match = line.match(/^(\d+)\.\s(.*)/)
         if (match) {
           const [, number, text] = match
-          const parts = text.split(':')
           elements.push(
-            <div key={`numbered-${i}`} className="flex items-start gap-4 mb-4 p-4 rounded-lg bg-white/5 border border-white/10 hover:border-purple-400/30 transition-all">
-              <span className="flex-shrink-0 w-8 h-8 rounded-full bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-400 font-bold text-sm">
-                {number}
-              </span>
-              <span className="flex-1 text-white/80 leading-relaxed mt-1">
-                {parts.length > 1 ? (
-                  <>
-                    <strong className="text-white font-semibold">{renderInlineFormatting(parts[0])}:</strong>
-                    <span className="text-white/70"> {renderInlineFormatting(parts.slice(1).join(':'))}</span>
-                  </>
-                ) : (
-                  renderInlineFormatting(text)
-                )}
-              </span>
+            <div key={`numbered-${i}`} className="mb-3">
+              <span className="text-white font-semibold mr-2">{number}.</span>
+              <span className="text-white/80 leading-relaxed">{renderInlineFormatting(text)}</span>
             </div>
           )
         }
@@ -324,6 +312,18 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           {url.startsWith('http') && <ExternalLink className="w-3 h-3" />}
         </a>
       ) },
+      { regex: /(https?:\/\/[^\s)]+)/g, render: (match: string) => (
+        <a
+          key={`autolink-${partIndex++}`}
+          href={match}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-purple-400 hover:text-purple-300 underline decoration-purple-400/30 hover:decoration-purple-300 transition-colors inline-flex items-center gap-1 cursor-pointer"
+        >
+          {match}
+          <ExternalLink className="w-3 h-3" />
+        </a>
+      ) },
     ]
 
     // Combine all patterns into one regex
@@ -354,19 +354,33 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
         const linkMatch = /\[([^\]]+)\]\(([^)]+)\)/.exec(match[0])
         if (linkMatch) {
           const [, text, url] = linkMatch
-          parts.push(
+        parts.push(
             <a
               key={`link-${partIndex++}`}
               href={url}
               target={url.startsWith('http') ? '_blank' : undefined}
               rel={url.startsWith('http') ? 'noopener noreferrer' : undefined}
-              className="text-purple-400 hover:text-purple-300 underline decoration-purple-400/30 hover:decoration-purple-300 transition-colors inline-flex items-center gap-1"
+              className="text-purple-400 hover:text-purple-300 underline decoration-purple-400/40 hover:decoration-purple-300 transition-colors inline-flex items-center gap-1 cursor-pointer"
             >
               {text}
               {url.startsWith('http') && <ExternalLink className="w-3 h-3" />}
             </a>
           )
         }
+      } else if (match[0].startsWith('http')) {
+        const url = match[0]
+        parts.push(
+          <a
+            key={`autolink-${partIndex++}`}
+            href={url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-purple-400 hover:text-purple-300 underline decoration-purple-400/30 hover:decoration-purple-300 transition-colors inline-flex items-center gap-1 cursor-pointer"
+          >
+            {url}
+            <ExternalLink className="w-3 h-3" />
+          </a>
+        )
       }
 
       lastIndex = combinedRegex.lastIndex
@@ -388,4 +402,3 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
     </div>
   )
 }
-

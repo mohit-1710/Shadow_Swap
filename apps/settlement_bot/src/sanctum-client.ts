@@ -66,8 +66,8 @@ export class SanctumClient {
         });
 
         if (!response.ok) {
-          const errorData = await response.json();
-          lastError = errorData.error || errorData.message || response.statusText;
+          const errorData: any = await response.json();
+          lastError = (errorData && (errorData.error || errorData.message)) || response.statusText;
           console.warn(`   ⚠️  Attempt ${attempt} failed: ${lastError}`);
           
           if (attempt < maxRetries) {
@@ -78,10 +78,10 @@ export class SanctumClient {
           return { error: lastError };
         }
 
-        const data = await response.json();
-        console.log(`   ✅ Transaction submitted: ${data.signature}`);
+        const data: any = await response.json();
+        console.log(`   ✅ Transaction submitted: ${data?.signature}`);
         
-        return { signature: data.signature };
+        return { signature: data?.signature };
       } catch (error) {
         lastError = error instanceof Error ? error.message : 'Unknown error';
         console.error(`   ❌ Attempt ${attempt} error:`, lastError);

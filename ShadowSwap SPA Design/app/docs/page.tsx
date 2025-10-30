@@ -11,7 +11,7 @@ import { MarkdownRenderer } from "@/components/MarkdownRenderer"
 const mockResponses = [
   "ShadowSwap uses encrypted orders to protect your trading strategy from MEV bots. Your order details remain private until execution.",
   "Orders are matched off-chain by keeper bots and settled on Solana with cryptographic proofs, ensuring both privacy and transparency.",
-  "You can enable LP Fallback for guaranteed execution, though it may reduce privacy guarantees. This routes through public liquidity pools.",
+  "You can enable Fallback for guaranteed execution, though it may reduce privacy guarantees. This routes through public liquidity pools.",
   "All settlements are verifiable on-chain while keeping order details private. You get the best of both worlds!",
   "The platform uses Arcium MXE for secure encrypted computation, allowing order matching without exposing trading intentions.",
   "Trading fees are 0.1% per transaction with no hidden MEV costs. What you see is what you pay.",
@@ -79,6 +79,8 @@ const docsSections = [
  */
 export default function DocsPage() {
   const [searchQuery, setSearchQuery] = useState("");
+  const [allDocsIndex, setAllDocsIndex] = useState<{ slug: string; title: string; content: string }[]>([]);
+  const [searchResults, setSearchResults] = useState<{ slug: string; title: string; snippet: string }[]>([]);
   const [activeSection, setActiveSection] = useState("getting-started");
   const [sidebarOpen, setSidebarOpen] = useState(false); // Mobile sidebar toggle
   const [markdownContent, setMarkdownContent] = useState<string>("");
@@ -130,9 +132,70 @@ export default function DocsPage() {
     section.description.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // Sync active section from URL hash (supports direct links to specific docs)
+  useEffect(() => {
+    const applyHash = () => {
+      const hash = window.location.hash?.replace('#', '')
+      if (hash && docsSections.find(s => s.id === hash || s.slug === hash)) {
+        setActiveSection(hash)
+      }
+    }
+    applyHash()
+    window.addEventListener('hashchange', applyHash)
+    return () => window.removeEventListener('hashchange', applyHash)
+  }, [])
+
+  // Build a simple full-text index of all docs (fetch once)
+  useEffect(() => {
+    const buildIndex = async () => {
+      try {
+        const entries: { slug: string; title: string; content: string }[] = [];
+        for (const s of docsSections) {
+          const res = await fetch(`/api/docs/${s.slug}`);
+          if (res.ok) {
+            const data = await res.json();
+            entries.push({ slug: s.slug, title: s.title, content: String(data.content || "") });
+          }
+        }
+        setAllDocsIndex(entries);
+      } catch (e) {
+        console.error('Failed to index docs', e);
+      }
+    };
+    buildIndex();
+  }, []);
+
+  // Full-text search with snippets beneath the search input
+  useEffect(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q || q.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const results: { slug: string; title: string; snippet: string }[] = [];
+    for (const entry of allDocsIndex) {
+      const hay = entry.content.toLowerCase();
+      const idx = hay.indexOf(q);
+      if (idx >= 0) {
+        const start = Math.max(0, idx - 60);
+        const end = Math.min(entry.content.length, idx + q.length + 60);
+        let snippet = entry.content.slice(start, end).replace(/\n/g, ' ');
+        snippet = snippet.replace(new RegExp(q, 'ig'), m => `«${m}»`);
+        results.push({ slug: entry.slug, title: docsSections.find(d => d.slug === entry.slug)?.title || entry.slug, snippet });
+      }
+    }
+    setSearchResults(results.slice(0, 8));
+  }, [searchQuery, allDocsIndex]);
+
   // Handle section navigation - smooth scroll and close mobile menu
   const handleSectionClick = (sectionId: string) => {
     setActiveSection(sectionId);
+    if (typeof window !== 'undefined') {
+      const newHash = `#${sectionId}`
+      if (window.location.hash !== newHash) {
+        history.replaceState(null, '', newHash)
+      }
+    }
     setSidebarOpen(false); // Close mobile menu after selection
   };
 
@@ -304,7 +367,7 @@ export default function DocsPage() {
           
           {/* Sidebar Navigation Items */}
           <nav className="space-y-1">
-            {docsSections.map((section) => {
+            {(searchQuery ? filteredSections : docsSections).map((section) => {
               const Icon = section.icon;
               return (
                 <button
@@ -365,7 +428,13 @@ export default function DocsPage() {
           {/* Search Bar */}
           <div className="mb-12">
             <div className="relative max-w-2xl">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-white/40" />
+              <Search
+                aria-hidden="true"
+                className="absolute left-4 inset-y-0 my-auto w-5 h-5 text-white/80 pointer-events-none"
+                strokeWidth={2}
+                shapeRendering="geometricPrecision"
+                vectorEffect="non-scaling-stroke"
+              />
               <Input
                 type="text"
                 placeholder="Search documentation..."
@@ -373,6 +442,34 @@ export default function DocsPage() {
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-12 h-12 text-base bg-white/5 border-white/10 focus:border-purple-400/50 focus:ring-purple-400/20"
               />
+              {searchQuery.trim().length >= 2 && (
+                <div className="absolute left-0 right-0 mt-2 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-2xl z-20">
+                  {searchResults.length > 0 ? (
+                    <ul className="max-h-72 overflow-y-auto py-2">
+                      {searchResults.map((r, i) => (
+                        <li key={`${r.slug}-${i}`}>
+                          <button
+                            onClick={() => {
+                              setActiveSection(r.slug);
+                              const hash = `#${r.slug}`
+                              if (window.location.hash !== hash) {
+                                history.replaceState(null, '', hash)
+                              }
+                              setSearchQuery("");
+                            }}
+                            className="w-full text-left px-4 py-3 hover:bg-white/5 transition-colors"
+                          >
+                            <div className="text-sm font-semibold text-white">{r.title}</div>
+                            <div className="text-xs text-white/60 mt-0.5 line-clamp-2">{r.snippet}</div>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <div className="px-4 py-3 text-sm text-white/50">No matches found</div>
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
@@ -701,4 +798,3 @@ export default function DocsPage() {
  * - Typography: Revert heading sizes and spacing
  * - Lists: Remove enhanced card backgrounds and custom bullets
  */
-
