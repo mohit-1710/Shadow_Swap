@@ -50,8 +50,8 @@ export class ArciumClient {
         throw new Error(`Arcium authentication failed: ${authResponse.statusText}`);
       }
 
-      const authData = await authResponse.json();
-      this.authToken = authData.token;
+      const authData: any = await authResponse.json();
+      this.authToken = authData?.token;
 
       console.log('✅ Arcium MPC client initialized successfully');
     } catch (error) {
@@ -94,18 +94,18 @@ export class ArciumClient {
       });
 
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData: any = await response.json();
         return {
           plaintext: '',
           nonce: '',
-          error: errorData.message || 'Decryption failed',
+          error: (errorData && (errorData.message as string)) || 'Decryption failed',
         };
       }
 
-      const data = await response.json();
+      const data: any = await response.json();
       return {
-        plaintext: data.plaintext,
-        nonce: data.nonce,
+        plaintext: data?.plaintext,
+        nonce: data?.nonce,
       };
     } catch (error) {
       console.error('Error decrypting with Arcium MPC:', error);
@@ -168,8 +168,8 @@ export class ArciumClient {
         }),
       });
 
-      const data = await response.json();
-      return data.valid === true;
+      const data: any = await response.json();
+      return data?.valid === true;
     } catch (error) {
       console.error('Error verifying decryption proof:', error);
       return false;
@@ -234,4 +234,3 @@ export class MockArciumClient extends ArciumClient {
     }
   }
 }
-

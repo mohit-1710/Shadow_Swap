@@ -328,73 +328,82 @@ class ShadowSwapKeeper {
   private async submitMatches(matches: MatchedPair[]): Promise<void> {
     console.log(`\n📤 Submitting ${matches.length} matches for settlement...`);
 
-    const transactions: Transaction[] = [];
-    const builtMatches: MatchedPair[] = [];
+    let successful = 0;
+    let failed = 0;
+    const failures: string[] = [];
 
-    // Build transactions for each match
+    // Track orders that have been settled this cycle to avoid duplicate attempts
+    const settledOrderSet = new Set<string>();
+
+    // Submit sequentially so we can adapt to status changes
     for (const match of matches) {
-      if (match.matchedAmount <= 0n) {
-        console.warn('   ⚠️  Skipping match with zero amount');
+      const buyKey = match.buyOrder.publicKey.toString();
+      const sellKey = match.sellOrder.publicKey.toString();
+
+      if (match.matchedAmount <= 0n || match.executionPrice <= 0n) {
+        console.warn('   ⚠️  Skipping invalid match (amount/price)');
         continue;
       }
-      if (match.executionPrice <= 0n) {
-        console.warn('   ⚠️  Skipping match with zero price');
+
+      if (settledOrderSet.has(buyKey) || settledOrderSet.has(sellKey)) {
+        console.log(`   ⏭️  Skipping match; order already settled in this cycle (buyer ${match.buyOrder.orderId}, seller ${match.sellOrder.orderId})`);
+        continue;
+      }
+
+      // Verify on-chain status before building
+      const ok = await this.ordersAreActive(match);
+      if (!ok) {
+        console.log(`   ⏭️  Skipping match; order status not ACTIVE/PARTIAL (buyer ${match.buyOrder.orderId}, seller ${match.sellOrder.orderId})`);
         continue;
       }
 
       try {
         const tx = await this.buildSettlementTransaction(match);
-        transactions.push(tx);
-        builtMatches.push(match);
-      } catch (error) {
-        this.logError(`Error building transaction for match`, error);
+        const res = await this.sanctumClient.submitTransaction(tx, this.config.maxRetries);
+        if (res.signature) {
+          console.log(
+            `   🎉 Completed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} at ${match.executionPrice} (tx ${res.signature})`
+          );
+          successful++;
+          settledOrderSet.add(buyKey);
+          settledOrderSet.add(sellKey);
+        } else {
+          const msg = res.error || 'Unknown submission error';
+          console.log(
+            `   ❌ Failed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} :: ${msg}`
+          );
+          failed++;
+          failures.push(msg);
+        }
+      } catch (error: any) {
+        const msg = error?.message || 'Build/submit error';
+        console.log(
+          `   ❌ Failed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} :: ${msg}`
+        );
+        failed++;
+        failures.push(msg);
       }
     }
-
-    if (transactions.length === 0) {
-      console.log('   ⚠️  No transactions to submit');
-      return;
-    }
-
-    // Submit via Sanctum (MEV protected)
-    const results = await this.sanctumClient.submitBatch(
-      transactions,
-      this.config.maxRetries
-    );
-
-    // Log results
-    const successful = results.filter(r => r.signature).length;
-    const failed = results.filter(r => r.error).length;
-
-    results.forEach((result, index) => {
-      const match = builtMatches[index];
-      if (result.signature) {
-        const buyOrderId = match?.buyOrder.orderId ?? 'unknown';
-        const sellOrderId = match?.sellOrder.orderId ?? 'unknown';
-        console.log(
-          `   🎉 Completed: buy order ${buyOrderId} ↔ sell order ${sellOrderId} at ` +
-            `${match?.executionPrice ?? 'N/A'} (tx ${result.signature})`
-        );
-      } else if (result.error) {
-        const buyOrderId = match?.buyOrder.orderId ?? 'unknown';
-        const sellOrderId = match?.sellOrder.orderId ?? 'unknown';
-        console.log(
-          `   ❌ Failed: buy order ${buyOrderId} ↔ sell order ${sellOrderId} :: ${result.error}`
-        );
-      }
-    });
 
     console.log(`\n📊 Settlement Results:`);
     console.log(`   ✅ Successful: ${successful}`);
     console.log(`   ❌ Failed:     ${failed}`);
-
     if (failed > 0) {
       console.log(`\n   Failed transactions:`);
-      results.forEach((result, idx) => {
-        if (result.error) {
-          console.log(`      ${idx + 1}. ${result.error}`);
-        }
-      });
+      failures.forEach((f, i) => console.log(`      ${i + 1}. ${f}`));
+    }
+  }
+
+  private async ordersAreActive(match: MatchedPair): Promise<boolean> {
+    try {
+      const buyerOrder = await (this.program.account as any).encryptedOrder.fetch(match.buyOrder.publicKey);
+      const sellerOrder = await (this.program.account as any).encryptedOrder.fetch(match.sellOrder.publicKey);
+      // 1 = ACTIVE, 2 = PARTIAL
+      const isActive = (s: number) => s === 1 || s === 2;
+      return isActive(buyerOrder.status) && isActive(sellerOrder.status);
+    } catch (e) {
+      console.warn('   ⚠️  Unable to fetch order status before submit:', e);
+      return false;
     }
   }
 

@@ -14,6 +14,15 @@ const USDC_MINT = new PublicKey("4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU");
 async function main() {
   console.log("\n🚀 ShadowSwap Devnet Setup\n");
 
+  // Provide sane defaults if env is missing
+  if (!process.env.ANCHOR_PROVIDER_URL) {
+    process.env.ANCHOR_PROVIDER_URL = 'https://api.devnet.solana.com';
+  }
+  if (!process.env.ANCHOR_WALLET) {
+    const home = process.env.HOME || process.env.USERPROFILE;
+    process.env.ANCHOR_WALLET = require('path').join(home, '.config/solana/id.json');
+  }
+
   const provider = anchor.AnchorProvider.env();
   anchor.setProvider(provider);
 
@@ -90,7 +99,7 @@ MATCH_INTERVAL=10000
 MAX_RETRIES=3
 RETRY_DELAY_MS=1000
 USE_MOCK_ARCIUM=true
-USE_MOCK_SANCTUM=true
+USE_MOCK_SANCTUM=false
 USE_DIRECT_RPC=true
 LOG_LEVEL=info
 `;

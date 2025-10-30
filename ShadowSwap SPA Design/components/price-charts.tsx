@@ -133,8 +133,10 @@ async function fetchSolanaPrice(days: number, retryCount = 0): Promise<CoinGecko
   }
 
   try {
+    // Call our Next.js proxy to avoid CORS and centralize rate limiting
     const response = await fetch(
-      `https://api.coingecko.com/api/v3/coins/solana/market_chart?vs_currency=usd&days=${days}&precision=full`
+      `/api/price/history?days=${days}`,
+      { cache: 'no-store' }
     )
 
     if (response.status === 429) {

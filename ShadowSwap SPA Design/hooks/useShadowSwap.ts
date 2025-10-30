@@ -108,13 +108,32 @@ export function useShadowSwap() {
     }
   }, [shadowSwapClient])
 
+  const getWsolBalance = useCallback(async (): Promise<number> => {
+    if (!shadowSwapClient) return 0
+    try {
+      return await shadowSwapClient.getWsolBalance()
+    } catch {
+      return 0
+    }
+  }, [shadowSwapClient])
+
+  const unwrapWsol = useCallback(async (): Promise<OrderResult> => {
+    if (!shadowSwapClient) return { success: false, error: 'Client not initialized' }
+    try {
+      return await shadowSwapClient.unwrapWsol()
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to unwrap WSOL' }
+    }
+  }, [shadowSwapClient])
+
   return {
     shadowSwapClient,
     submitOrder,
     getBalances,
     cancelOrder,
+    getWsolBalance,
+    unwrapWsol,
     isLoading,
     error,
   }
 }
-

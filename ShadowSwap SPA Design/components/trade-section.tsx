@@ -110,6 +110,7 @@ export function TradeSection() {
     return () => clearTimeout(timer)
   }, [isWalletConnected, getBalances, walletAddress])
 
+
   // Auto-calculate "To" amount based on price and amount
   useEffect(() => {
     if (!fromAmount || parseFloat(fromAmount) <= 0) {
@@ -227,7 +228,20 @@ export function TradeSection() {
 
     // Determine side (buy or sell)
     const side = fromToken === "SOL" ? "sell" : "buy"
-    const amount = parseFloat(fromAmount)
+    // submitOrder expects amount in BASE units (SOL) for both sides
+    let amount = 0
+    if (side === "sell") {
+      amount = parseFloat(fromAmount)
+    } else {
+      // Buy: convert USDC input to base amount using limit/market price
+      // Prefer the computed toAmount if available; otherwise derive from inputs
+      if (toAmount) {
+        amount = parseFloat(toAmount)
+      } else {
+        const refPrice = orderType === "market" ? currentMarketPrice : parseFloat(limitPrice)
+        amount = refPrice && refPrice > 0 ? parseFloat(fromAmount) / refPrice : 0
+      }
+    }
     let price: number
 
     if (orderType === "market") {
