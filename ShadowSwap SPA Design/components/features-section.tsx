@@ -36,7 +36,7 @@ const features = [
 
 const stats = [
   { value: "$2.4M+", label: "Total Volume" },
-  { value: "1,200+", label: "Active Traders" },
+  { value: "200+", label: "Active Traders" },
   { value: "0 ms", label: "MEV Protection" },
 ]
 
@@ -110,4 +110,3 @@ export function FeaturesSection() {
     </section>
   )
 }
-

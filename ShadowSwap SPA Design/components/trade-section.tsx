@@ -298,24 +298,7 @@ export function TradeSection() {
                   </button>
                 </div>
 
-                {/* Critical Warning */}
-                <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle className="w-5 h-5 text-orange-400 flex-shrink-0 mt-0.5" />
-                    <div className="text-xs text-orange-200/90">
-                      <p className="font-semibold mb-1">⚠️ Testing Phase - Known Limitations:</p>
-                      <ul className="list-disc list-inside space-y-1 text-orange-200/70">
-                        <li>Only SOL/USDC pair supported</li>
-                        <li>Requires wrapped SOL (WSOL) token account</li>
-                        <li>Need devnet USDC from backend team</li>
-                        <li>Settlement requires keeper bot running</li>
-                      </ul>
-                      <p className="mt-2 text-[10px]">
-                        See <span className="font-mono">CRITICAL_ISSUES_FOUND.md</span> for setup instructions
-                      </p>
-                    </div>
-                  </div>
-                </div>
+                {/* Critical Warning removed per request */}
 
                 {/* From Token */}
                 <div>

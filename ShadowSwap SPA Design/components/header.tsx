@@ -6,13 +6,16 @@ import Link from "next/link"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useWallet } from "@/contexts/WalletContext"
+import { isAdminAddress } from "@/lib/admin"
 import { Menu, X } from "lucide-react"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
   const router = useRouter()
   const pathname = usePathname()
-  const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
+  const { isWalletConnected, walletAddress, connectWallet, disconnectWallet, wallet } = useWallet()
+  const currentAddress = wallet.publicKey?.toBase58() || walletAddress
+  const isAdmin = isAdminAddress(currentAddress)
 
   // Old: Had Trade, Orders, and Docs navigation - keeping for reference
   // const navItems = [
@@ -35,7 +38,7 @@ export function Header() {
       return
     }
 
-    // If connected but not on trade page, navigate to trade page
+    // If connected, navigate to trade page (admin opens panel via link)
     if (isWalletConnected) {
       router.push("/trade")
       return
@@ -46,7 +49,7 @@ export function Header() {
     
     if (success) {
       toast.success("Connected successfully")
-      // Navigate to trade page after successful connection
+      // Always go to trade; admins can click Admin link to open panel
       router.push("/trade")
     } else {
       toast.error("Error while connecting wallet")
@@ -91,6 +94,14 @@ export function Header() {
                 </Link>
               )
             ))}
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="text-white/80 hover:text-purple-400 transition-colors duration-200 text-sm font-medium"
+              >
+                Admin
+              </Link>
+            )}
           </nav>
           
           {/* Connect Wallet Button */}
@@ -143,6 +154,15 @@ export function Header() {
                 </Link>
               )
             ))}
+            {isAdmin && (
+              <Link
+                href="/admin"
+                className="text-white/80 hover:text-purple-400 transition-colors duration-200 py-2"
+                onClick={() => setIsOpen(false)}
+              >
+                Admin
+              </Link>
+            )}
             <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
               <div className="relative overflow-hidden">
                 <Button variant="default" size="sm" className="w-full cursor-pointer hover:scale-105 transition-transform" onClick={handleWalletClick}>
