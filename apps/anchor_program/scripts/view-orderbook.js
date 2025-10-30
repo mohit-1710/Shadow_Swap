@@ -3,8 +3,8 @@ const { Connection, PublicKey } = require("@solana/web3.js");
 const fs = require("fs");
 const path = require("path");
 
-const PROGRAM_ID = "5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt";
-const ORDER_BOOK_PUBKEY = "FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8";
+const PROGRAM_ID = "CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA";
+const ORDER_BOOK_PUBKEY = "63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ";
 const RPC_URL = "https://api.devnet.solana.com";
 
 async function viewOrderBook() {

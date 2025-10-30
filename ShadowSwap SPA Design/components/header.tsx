@@ -1,21 +1,32 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useRef, useEffect } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useWallet } from "@/contexts/WalletContext"
-import { isAdminAddress } from "@/lib/admin"
-import { Menu, X } from "lucide-react"
+import { Menu, X, Copy, RefreshCw, LogOut, ChevronDown } from "lucide-react"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
+  const [showWalletDropdown, setShowWalletDropdown] = useState(false)
+  const walletDropdownRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const pathname = usePathname()
-  const { isWalletConnected, walletAddress, connectWallet, disconnectWallet, wallet } = useWallet()
-  const currentAddress = wallet.publicKey?.toBase58() || walletAddress
-  const isAdmin = isAdminAddress(currentAddress)
+  const isDocs = pathname?.startsWith("/docs")
+  const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (walletDropdownRef.current && !walletDropdownRef.current.contains(event.target as Node)) {
+        setShowWalletDropdown(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
 
   // Old: Had Trade, Orders, and Docs navigation - keeping for reference
   // const navItems = [
@@ -29,18 +40,48 @@ export function Header() {
 
   const isOnTradePage = pathname === "/trade"
 
-  const handleWalletClick = async () => {
-    // If on trade page and connected, disconnect the wallet
-    if (isWalletConnected && isOnTradePage) {
-      disconnectWallet()
-      toast.success("Wallet disconnected")
-      router.push("/")
-      return
-    }
+  // Truncate wallet address for display
+  const getTruncatedAddress = () => {
+    if (!walletAddress) return ""
+    return `${walletAddress.slice(0, 4)}....${walletAddress.slice(-4)}`
+  }
 
-    // If connected, navigate to trade page (admin opens panel via link)
+  // Copy address to clipboard
+  const handleCopyAddress = () => {
+    if (walletAddress) {
+      navigator.clipboard.writeText(walletAddress)
+      toast.success("Address copied to clipboard!", { dismissible: true })
+      setShowWalletDropdown(false)
+    }
+  }
+
+  // Change wallet (disconnect and reconnect)
+  const handleChangeWallet = async () => {
+    setShowWalletDropdown(false)
+    disconnectWallet()
+    toast.info("Please select a different wallet", { dismissible: true })
+    setTimeout(async () => {
+      const success = await connectWallet()
+      if (success) {
+        toast.success("Wallet changed successfully", { dismissible: true })
+      }
+    }, 500)
+  }
+
+  // Disconnect wallet
+  const handleDisconnect = () => {
+    setShowWalletDropdown(false)
+    disconnectWallet()
+    toast.success("Wallet disconnected", { dismissible: true })
+    if (isOnTradePage) {
+      router.push("/")
+    }
+  }
+
+  const handleWalletClick = async () => {
+    // If connected, toggle dropdown
     if (isWalletConnected) {
-      router.push("/trade")
+      setShowWalletDropdown(!showWalletDropdown)
       return
     }
 
@@ -48,18 +89,12 @@ export function Header() {
     const success = await connectWallet()
     
     if (success) {
-      toast.success("Connected successfully")
-      // Always go to trade; admins can click Admin link to open panel
+      toast.success("Connected successfully", { dismissible: true })
+      // Navigate to trade page after successful connection
       router.push("/trade")
     } else {
-      toast.error("Error while connecting wallet")
+      toast.error("Error while connecting wallet", { dismissible: true })
     }
-  }
-
-  const getButtonText = () => {
-    if (!isWalletConnected) return "Connect Wallet"
-    if (isOnTradePage) return "Disconnect Wallet"
-    return "Start Trading"
   }
 
   return (
@@ -94,29 +129,71 @@ export function Header() {
                 </Link>
               )
             ))}
-            {isAdmin && (
-              <Link
-                href="/admin"
-                className="text-white/80 hover:text-purple-400 transition-colors duration-200 text-sm font-medium"
-              >
-                Admin
-              </Link>
-            )}
           </nav>
           
-          {/* Connect Wallet Button */}
-          <div className="relative overflow-hidden">
-            <Button variant="default" size="sm" onClick={handleWalletClick} className="cursor-pointer hover:scale-105 transition-transform">
-              {getButtonText()}
-            </Button>
-            {/* Animated lines */}
-            {!isWalletConnected && (
-              <>
-                <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
-                <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
-              </>
+          {/* Connect Wallet Button (hidden on docs) */}
+          {!isDocs && (
+          <div className="relative" ref={walletDropdownRef}>
+            <div className="relative overflow-hidden">
+              <Button 
+                variant="default" 
+                size="sm" 
+                onClick={handleWalletClick} 
+                className="cursor-pointer hover:scale-105 transition-transform flex items-center gap-2"
+              >
+                {isWalletConnected ? (
+                  <>
+                    <span>{getTruncatedAddress()}</span>
+                    <ChevronDown className="w-4 h-4" />
+                  </>
+                ) : (
+                  "Connect Wallet"
+                )}
+              </Button>
+              {/* Animated lines */}
+              {!isWalletConnected && (
+                <>
+                  <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+                  <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+                </>
+              )}
+            </div>
+
+            {/* Wallet Dropdown Menu */}
+            {isWalletConnected && showWalletDropdown && (
+              <div className="absolute top-full right-0 mt-2 w-56 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[100]">
+                <div className="py-1">
+                  {/* Copy Address */}
+                  <button
+                    onClick={handleCopyAddress}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <Copy className="w-4 h-4 text-purple-400" />
+                    <span className="text-white text-sm">Copy Address</span>
+                  </button>
+
+                  {/* Change Wallet */}
+                  <button
+                    onClick={handleChangeWallet}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/10 transition-colors text-left"
+                  >
+                    <RefreshCw className="w-4 h-4 text-blue-400" />
+                    <span className="text-white text-sm">Change Wallet</span>
+                  </button>
+
+                  {/* Disconnect */}
+                  <button
+                    onClick={handleDisconnect}
+                    className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left border-t border-white/10"
+                  >
+                    <LogOut className="w-4 h-4 text-red-400" />
+                    <span className="text-red-400 text-sm">Disconnect</span>
+                  </button>
+                </div>
+              </div>
             )}
           </div>
+          )}
         </div>
 
         {/* Mobile Menu Button */}
@@ -154,19 +231,23 @@ export function Header() {
                 </Link>
               )
             ))}
-            {isAdmin && (
-              <Link
-                href="/admin"
-                className="text-white/80 hover:text-purple-400 transition-colors duration-200 py-2"
-                onClick={() => setIsOpen(false)}
-              >
-                Admin
-              </Link>
-            )}
+            {!isDocs && (
             <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
               <div className="relative overflow-hidden">
-                <Button variant="default" size="sm" className="w-full cursor-pointer hover:scale-105 transition-transform" onClick={handleWalletClick}>
-                  {getButtonText()}
+                <Button 
+                  variant="default" 
+                  size="sm" 
+                  className="w-full cursor-pointer hover:scale-105 transition-transform flex items-center justify-center gap-2" 
+                  onClick={handleWalletClick}
+                >
+                  {isWalletConnected ? (
+                    <>
+                      <span>{getTruncatedAddress()}</span>
+                      <ChevronDown className="w-4 h-4" />
+                    </>
+                  ) : (
+                    "Connect Wallet"
+                  )}
                 </Button>
                 {/* Animated lines */}
                 {!isWalletConnected && (
@@ -176,7 +257,42 @@ export function Header() {
                   </>
                 )}
               </div>
+
+              {/* Mobile Wallet Dropdown Menu */}
+              {isWalletConnected && showWalletDropdown && (
+                <div className="bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl">
+                  <div className="py-1">
+                    {/* Copy Address */}
+                    <button
+                      onClick={handleCopyAddress}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/10 transition-colors text-left"
+                    >
+                      <Copy className="w-4 h-4 text-purple-400" />
+                      <span className="text-white text-sm">Copy Address</span>
+                    </button>
+
+                    {/* Change Wallet */}
+                    <button
+                      onClick={handleChangeWallet}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-white/10 transition-colors text-left"
+                    >
+                      <RefreshCw className="w-4 h-4 text-blue-400" />
+                      <span className="text-white text-sm">Change Wallet</span>
+                    </button>
+
+                    {/* Disconnect */}
+                    <button
+                      onClick={handleDisconnect}
+                      className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-left border-t border-white/10"
+                    >
+                      <LogOut className="w-4 h-4 text-red-400" />
+                      <span className="text-red-400 text-sm">Disconnect</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
+            )}
           </nav>
         </div>
       )}

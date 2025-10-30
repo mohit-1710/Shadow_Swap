@@ -2,16 +2,18 @@
   "name": "my-v0-project",
   "version": "0.1.0",
   "private": true,
-  "packageManager": "pnpm@10.19.0+sha512.c9fc7236e92adf5c8af42fd5bf1612df99c2ceb62f27047032f4720b33f8eacdde311865e91c411f2774f618d82f320808ecb51718bfa82c060c4ba7c76a32b8",
+  "packageManager": "pnpm@10.19.0",
   "scripts": {
     "build": "next build",
     "dev": "next dev",
     "lint": "eslint .",
-    "start": "next start"
+    "start": "next start",
+    "setup:pool": "ts-node scripts/setupOrcaPool.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
     "@hookform/resolvers": "^3.10.0",
+    "@project-serum/anchor": "^0.26.0",
     "@radix-ui/react-accordion": "1.2.2",
     "@radix-ui/react-alert-dialog": "1.1.4",
     "@radix-ui/react-aspect-ratio": "1.1.1",
@@ -42,10 +44,9 @@
     "@react-three/drei": "latest",
     "@react-three/fiber": "latest",
     "@solana/spl-token": "^0.4.14",
-    "@solana/wallet-adapter-base": "^0.9.27",
-    "@solana/wallet-adapter-react": "^0.15.39",
-    "@solana/wallet-adapter-react-ui": "^0.9.39",
-    "@solana/wallet-adapter-wallets": "^0.19.37",
+    "@solana/wallet-adapter-react": "0.15.39",
+    "@solana/wallet-adapter-react-ui": "0.9.39",
+    "@solana/wallet-adapter-wallets": "0.19.37",
     "@solana/web3.js": "^1.98.4",
     "@vercel/analytics": "1.3.1",
     "autoprefixer": "^10.4.20",
@@ -53,6 +54,7 @@
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
+    "decimal.js": "^10.6.0",
     "embla-carousel-react": "8.5.1",
     "expo": "latest",
     "expo-asset": "latest",
@@ -83,6 +85,7 @@
     "@types/react-dom": "^19",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
+    "ts-node": "^10.9.2",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
   }

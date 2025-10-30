@@ -1,17 +1,22 @@
 "use client"
 
-import { useState, useEffect, useRef, lazy, Suspense } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { PriceCharts } from "./price-charts"
 import { ArrowRightLeft, ChevronDown, AlertCircle } from "lucide-react"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useWallet } from "@/contexts/WalletContext"
 import { useShadowSwap } from "@/hooks/useShadowSwap"
+import { useCurrentPrice } from "@/hooks/useCurrentPrice"
 import { toast } from "sonner"
-
-// Lazy load the heavy PriceCharts component
-const PriceCharts = lazy(() => import("./price-charts").then(mod => ({ default: mod.PriceCharts })))
+import { Connection, PublicKey } from "@solana/web3.js"
+import { 
+  getPublicLiquidityQuote, 
+  getPublicLiquiditySwapTx, 
+  executePublicLiquiditySwap, 
+  getTokenMintForJupiter 
+} from "@/lib/jupiter"
 
 // All available tokens for selection (only tokens with icons from liquidity pool)
 const ALL_TOKENS = [
@@ -68,10 +73,13 @@ const TokenIcon = ({ token }: { token: string }) => {
 }
 
 export function TradeSection() {
-  // Wallet and ShadowSwap integration
-  const { isWalletConnected, walletAddress, connectWallet } = useWallet()
-  const { submitOrder, isLoading, error, getBalances } = useShadowSwap()
-
+  // Wallet and backend integration
+  const { isWalletConnected, walletAddress, connectWallet, wallet } = useWallet()
+  const { submitOrder, getBalances, isLoading, error } = useShadowSwap()
+  
+  // Get real-time SOL price
+  const { price: currentMarketPrice, isLoading: isPriceLoading } = useCurrentPrice()
+  
   const [fromToken, setFromToken] = useState("SOL")
   const [toToken, setToToken] = useState("USDC")
   const [fromAmount, setFromAmount] = useState("")
@@ -79,19 +87,89 @@ export function TradeSection() {
   const [limitPrice, setLimitPrice] = useState("")
   const [orderType, setOrderType] = useState<"limit" | "market">("limit")
   const [allowLiquidityPool, setAllowLiquidityPool] = useState(false)
+  const [daysToKeepOpen, setDaysToKeepOpen] = useState("7") // Default 7 days (used when fallback is OFF)
+  const [fallbackSeconds, setFallbackSeconds] = useState("10") // Default 10 seconds when fallback is ON
+  const [isFallbackCountdown, setIsFallbackCountdown] = useState(false)
+  const [fallbackCountdown, setFallbackCountdown] = useState(10)
   
-  // Balances
+  // Balance state
   const [solBalance, setSolBalance] = useState(0)
   const [usdcBalance, setUsdcBalance] = useState(0)
+  
+  // Submission state
+  const [isSubmitting, setIsSubmitting] = useState(false)
   
   // Dropdown state
   const [showFromDropdown, setShowFromDropdown] = useState(false)
   const [showToDropdown, setShowToDropdown] = useState(false)
+  const [showDaysDropdown, setShowDaysDropdown] = useState(false)
   const [visibleTokenCount, setVisibleTokenCount] = useState(8)
   
   // Refs for click outside detection
   const fromDropdownRef = useRef<HTMLDivElement>(null)
   const toDropdownRef = useRef<HTMLDivElement>(null)
+  const daysDropdownRef = useRef<HTMLDivElement>(null)
+  const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com"
+
+  // Load balances when wallet connects or client initializes
+  useEffect(() => {
+    if (!isWalletConnected) return
+    // Small delay gives the ShadowSwap client time to initialize
+    const timer = setTimeout(() => {
+      loadBalances()
+    }, 400)
+    return () => clearTimeout(timer)
+  }, [isWalletConnected, getBalances, walletAddress])
+
+
+  // Auto-calculate "To" amount based on price and amount
+  useEffect(() => {
+    if (!fromAmount || parseFloat(fromAmount) <= 0) {
+      setToAmount("")
+      return
+    }
+
+    const amount = parseFloat(fromAmount)
+    let calculatedAmount = 0
+
+    if (orderType === "market") {
+      // Use current market price
+      if (fromToken === "SOL") {
+        // Selling SOL for USDC: amount * price
+        calculatedAmount = amount * currentMarketPrice
+      } else {
+        // Buying SOL with USDC: amount / price
+        calculatedAmount = amount / currentMarketPrice
+      }
+    } else {
+      // Limit order - use limit price
+      if (!limitPrice || parseFloat(limitPrice) <= 0) {
+        setToAmount("")
+        return
+      }
+      
+      const price = parseFloat(limitPrice)
+      if (fromToken === "SOL") {
+        // Selling SOL for USDC: amount * price
+        calculatedAmount = amount * price
+      } else {
+        // Buying SOL with USDC: amount / price
+        calculatedAmount = amount / price
+      }
+    }
+
+    setToAmount(calculatedAmount.toFixed(6))
+  }, [fromAmount, limitPrice, orderType, fromToken, currentMarketPrice])
+
+  const loadBalances = async () => {
+    try {
+      const balances = await getBalances()
+      setSolBalance(balances.sol)
+      setUsdcBalance(balances.usdc)
+    } catch (err) {
+      console.error("Error loading balances:", err)
+    }
+  }
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -101,6 +179,9 @@ export function TradeSection() {
       }
       if (toDropdownRef.current && !toDropdownRef.current.contains(event.target as Node)) {
         setShowToDropdown(false)
+      }
+      if (daysDropdownRef.current && !daysDropdownRef.current.contains(event.target as Node)) {
+        setShowDaysDropdown(false)
       }
     }
 
@@ -121,98 +202,198 @@ export function TradeSection() {
     setFromToken(toToken)
     setToToken(fromToken)
     setFromAmount(toAmount)
-    setToAmount(fromAmount)
+    // toAmount will auto-calculate via useEffect
   }
 
-  // Load balances when wallet connects
-  useEffect(() => {
-    if (isWalletConnected) {
-      loadBalances()
-    }
-  }, [isWalletConnected])
-
-  const loadBalances = async () => {
-    try {
-      const balances = await getBalances()
-      setSolBalance(balances.sol)
-      setUsdcBalance(balances.usdc)
-    } catch (err) {
-      console.error("Error loading balances:", err)
-    }
-  }
-
-  // Handle trade submission
   const handleTrade = async () => {
+    // Prevent double-clicks
+    if (isSubmitting) {
+      return
+    }
+
     // Validate wallet connection
     if (!isWalletConnected) {
-      toast.error("Please connect your wallet first")
-      await connectWallet()
+      toast.error("Please connect your wallet first", { dismissible: true })
       return
     }
 
-    // Validate inputs
+    // Currently only SOL/USDC pair is supported
+    if ((fromToken !== "SOL" && fromToken !== "USDC") || (toToken !== "SOL" && toToken !== "USDC")) {
+      toast.warning("Currently only SOL/USDC trading pair is supported", { dismissible: true })
+      return
+    }
+
+    // Validate amount
     if (!fromAmount || parseFloat(fromAmount) <= 0) {
-      toast.error("Please enter a valid amount")
+      toast.error("Please enter a valid amount", { dismissible: true })
       return
     }
 
-    // For limit orders, validate price
-    if (orderType === "limit" && (!limitPrice || parseFloat(limitPrice) <= 0)) {
-      toast.error("Please enter a valid limit price")
-      return
+    // Validate price for limit orders
+    if (orderType === "limit") {
+      if (!limitPrice || parseFloat(limitPrice) <= 0) {
+        toast.error("Please enter a valid limit price", { dismissible: true })
+        return
+      }
     }
 
-    // Only SOL/USDC pair is supported currently
-    if (!((fromToken === "SOL" && toToken === "USDC") || (fromToken === "USDC" && toToken === "SOL"))) {
-      toast.error("Currently only SOL/USDC pair is supported on the smart contract")
-      return
-    }
-
-    // Determine order side based on tokens
+    // Determine side (buy or sell)
     const side = fromToken === "SOL" ? "sell" : "buy"
-    const amount = parseFloat(fromAmount)
-    
-    // For market orders, use a default price (will be matched at market)
-    // For limit orders, use the user-specified price
+    // submitOrder expects amount in BASE units (SOL) for both sides
+    let amount = 0
+    if (side === "sell") {
+      amount = parseFloat(fromAmount)
+    } else {
+      // Buy: convert USDC input to base amount using limit/market price
+      // Prefer the computed toAmount if available; otherwise derive from inputs
+      if (toAmount) {
+        amount = parseFloat(toAmount)
+      } else {
+        const refPrice = orderType === "market" ? currentMarketPrice : parseFloat(limitPrice)
+        amount = refPrice && refPrice > 0 ? parseFloat(fromAmount) / refPrice : 0
+      }
+    }
     let price: number
+
     if (orderType === "market") {
-      // Use current market price estimate (in reality you'd fetch this)
-      price = 100 // Default market price
-      toast.info("Market orders use best available price")
+      price = 100 // Default market price - will be matched by bot
+      toast.info("Market orders use best available price", { dismissible: true })
     } else {
       price = parseFloat(limitPrice)
     }
 
-    try {
-      toast.loading("Submitting order to blockchain...")
-      
-      const result = await submitOrder({
-        side,
-        price,
-        amount,
-      })
+    // Note: Days dropdown is UI-only for now - expiration feature coming soon
+    if (orderType === "limit" && daysToKeepOpen !== "0") {
+      console.log("Selected order duration:", daysToKeepOpen, "days (UI only - not implemented yet)")
+    }
 
+    try {
+      setIsSubmitting(true)
+      
+      const loadingToast = toast.loading("Submitting order to blockchain...", {
+        duration: Infinity, // Don't auto-dismiss
+        dismissible: true, // Allow manual dismiss with X button
+      })
+      
+      const result = await submitOrder({ side, price, amount })
+      
+      // Dismiss the loading toast before showing result
+      toast.dismiss(loadingToast)
+      
       if (result.success) {
-        toast.success(
-          <div>
-            <p className="font-semibold">Order submitted successfully!</p>
-            <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
-          </div>
-        )
-        
-        // Clear form
-        setFromAmount("")
-        setToAmount("")
-        setLimitPrice("")
-        
-        // Refresh balances
-        loadBalances()
+        // Start fallback countdown if enabled
+        if (allowLiquidityPool) {
+          const secs = parseInt(fallbackSeconds || "10", 10)
+          setIsFallbackCountdown(true)
+          setFallbackCountdown(secs)
+
+          // Periodic 1-second countdown
+          const countdownInterval = setInterval(() => {
+            setFallbackCountdown((prev) => {
+              if (prev <= 1) {
+                clearInterval(countdownInterval)
+                return 0
+              }
+              return prev - 1
+            })
+          }, 1000)
+
+          // Execute fallback after selected seconds
+          setTimeout(async () => {
+            console.log("🔄 Fallback triggered - no private match found in", secs, "seconds")
+            setIsFallbackCountdown(false)
+            try {
+              // Only attempt Jupiter swap on mainnet
+              const isMainnet = RPC_URL.includes("mainnet")
+              if (!isMainnet) {
+                console.warn("⚠️ Fallback mode triggered, but Jupiter API only works on mainnet")
+                toast.warning("Fallback triggered: Public liquidity network available only on mainnet. Order remains in private orderbook.")
+                toast.info("Liquidity pool request cannot be executed on Devnet. Your order has been added to the private orderbook and will be matched when possible.")
+              } else {
+                await executeFallbackSwap()
+              }
+            } catch (e: any) {
+              console.error("❌ Fallback swap error:", e)
+              const msg = e?.message || "Fallback swap failed. Your order remains in the private orderbook."
+              if (/Failed to fetch/i.test(msg)) {
+                toast.warning("Public liquidity network unavailable. Your order remains in orderbook.")
+              } else if (/User rejected|User canceled|WalletSignTransactionError/i.test(msg)) {
+                toast.info("Fallback swap cancelled")
+              } else if (/No routes/i.test(msg)) {
+                toast.warning("No liquidity routes found for this pair")
+              } else {
+                toast.error(msg)
+              }
+            } finally {
+              // Reset form after fallback completes/handles
+              setFromAmount("")
+              setToAmount("")
+              setLimitPrice("")
+              loadBalances()
+            }
+          }, secs * 1000)
+        } else {
+          // No fallback → simple success
+          toast.success(
+            <div>
+              <p className="font-semibold">Order submitted successfully!</p>
+              <p className="text-xs mt-1">Signature: {result.signature?.slice(0, 8)}...</p>
+            </div>,
+            { dismissible: true }
+          )
+          // Reset form
+          setFromAmount("")
+          setToAmount("")
+          setLimitPrice("")
+          loadBalances()
+        }
       } else {
-        toast.error(`Order failed: ${result.error}`)
+        toast.error(`Order failed: ${result.error}`, { dismissible: true })
       }
     } catch (err: any) {
       console.error("Trade error:", err)
-      toast.error(err.message || "Failed to submit order")
+      toast.error(err.message || "Failed to submit order", { dismissible: true })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  // Execute fallback swap through Jupiter (MAINNET only)
+  const executeFallbackSwap = async () => {
+    try {
+      if (!wallet?.publicKey || !wallet?.signTransaction) {
+        throw new Error("Wallet not available for fallback swap")
+      }
+
+      // Determine swap direction and amount in minor units
+      const inputSymbol = fromToken
+      const outputSymbol = toToken
+      const decimals = inputSymbol === 'SOL' ? 9 : 6
+      const amountIn = parseFloat(fromAmount || '0')
+      if (!amountIn || amountIn <= 0) throw new Error('Invalid amount for fallback swap')
+
+      const inputMint = getTokenMintForJupiter(inputSymbol)
+      const outputMint = getTokenMintForJupiter(outputSymbol)
+      const minorAmount = toMinorUnits(amountIn, decimals)
+
+      console.log('📊 Getting quote from public liquidity network...')
+      const quote = await getPublicLiquidityQuote(inputMint, outputMint, minorAmount)
+
+      console.log('✍️ Requesting swap transaction (fallback) ...')
+      const base64Tx = await getPublicLiquiditySwapTx(quote, wallet.publicKey as PublicKey)
+
+      const connection = new Connection(RPC_URL, 'confirmed')
+      const txid = await executePublicLiquiditySwap(base64Tx, wallet, connection)
+
+      toast.success(
+        <div>
+          <p className="font-semibold">Order executed via public liquidity network</p>
+          <p className="text-xs mt-1">Tx: {txid.slice(0, 8)}...</p>
+        </div>
+      )
+      console.log('✅ Fallback swap executed successfully:', txid)
+    } catch (e: any) {
+      throw e
     }
   }
 
@@ -233,47 +414,71 @@ export function TradeSection() {
                 <CardTitle className="text-lg sm:text-xl">Place Order</CardTitle>
                 */}
                 
-                {/* New: Title with LP Fallback Toggle */}
+                {/* New: Title with Fallback Toggle */}
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-lg sm:text-xl">Place Order</CardTitle>
                   
-                  {/* Liquidity Pool Fallback Toggle */}
+                  {/* Fallback Toggle */}
                   <div className="relative group">
-                    <button
-                      onClick={() => setAllowLiquidityPool(!allowLiquidityPool)}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
-                        allowLiquidityPool
-                          ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
-                          : 'bg-white/5 border-white/10 text-white/60 hover:border-white/20'
-                      }`}
-                    >
-                      <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
-                        allowLiquidityPool ? 'border-purple-400' : 'border-white/40'
-                      }`}>
-                        {allowLiquidityPool && (
-                          <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
-                        )}
-                      </div>
-                      <span>LP Fallback</span>
-                    </button>
+                    <div className="relative overflow-hidden">
+                      <button
+                        onClick={() => {
+                          const next = !allowLiquidityPool
+                          setAllowLiquidityPool(next)
+                          if (next) {
+                            const isMainnet = RPC_URL.includes("mainnet")
+                            if (!isMainnet) {
+                              toast.warning("Liquidity pool fallback is unavailable on devnet. Your order will remain in the private orderbook.")
+                              toast.info("On mainnet, fallback will execute via public liquidity as planned.")
+                            }
+                          }
+                        }}
+                        className={`relative flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${
+                          allowLiquidityPool
+                            ? 'bg-purple-500/20 border-purple-400/50 text-purple-400'
+                            : 'bg-white/5 border-white/10 text-white/60 hover:border-white/20'
+                        }`}
+                      >
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${
+                          allowLiquidityPool ? 'border-purple-400' : 'border-white/40'
+                        }`}>
+                          {allowLiquidityPool && (
+                            <div className="w-1.5 h-1.5 rounded-full bg-purple-400" />
+                          )}
+                        </div>
+                        <span>Fallback{isFallbackCountdown ? ` (${fallbackCountdown}s)` : ''}</span>
+                      </button>
+                      {/* Animated lines - same as connect wallet button */}
+                      {!allowLiquidityPool && (
+                        <>
+                          <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+                          <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+                        </>
+                      )}
+                    </div>
 
                     {/* Tooltip - positioned above button */}
-                    <div className="absolute bottom-full right-0 mb-2 w-64 p-3 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                    <div className="absolute bottom-full right-0 mb-2 w-72 p-3 bg-gradient-to-b from-black/95 to-purple-950/30 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none shadow-purple-500/10">
                       <p className="text-xs text-white/80 leading-relaxed">
-                        Enable this to allow your order to execute through liquidity pools if no direct orderbook match is found. 
-                        <span className="text-purple-400 font-medium"> Note:</span> This may reduce privacy guarantees but ensures order execution.
+                        Enable to allow a direct swap on the public Solana liquidity network if no private match is found.
+                        The system will first try to match your order <span className="text-purple-400 font-medium">privately</span>,
+                        then wait <span className="text-purple-400 font-bold">{fallbackSeconds}s</span> before routing to a liquidity pool.
                       </p>
                     </div>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* LP Fallback Warning */}
+                {/* Fallback Banner / Warning */}
                 {allowLiquidityPool && (
                   <div className="bg-purple-500/10 border border-purple-400/30 rounded-lg p-3">
                     <p className="text-xs text-purple-400 flex items-center gap-2">
                       <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                      <span>Liquidity pool fallback enabled - order may execute with reduced privacy</span>
+                      <span>
+                        {isFallbackCountdown
+                          ? `Private matching… (${fallbackCountdown}s)`
+                          : 'Fallback enabled — order may execute via liquidity pool if not matched privately'}
+                      </span>
                     </p>
                   </div>
                 )}
@@ -297,8 +502,6 @@ export function TradeSection() {
                     Market
                   </button>
                 </div>
-
-                {/* Critical Warning removed per request */}
 
                 {/* From Token */}
                 <div>
@@ -361,7 +564,17 @@ export function TradeSection() {
                     </div>
                   </div>
                   <div className="text-xs text-white/40 mt-1">
-                    Balance: {isWalletConnected ? `${solBalance.toFixed(4)} ${fromToken}` : "Connect wallet"}
+                    Balance: {
+                      isWalletConnected
+                        ? `${
+                            fromToken === "SOL"
+                              ? solBalance.toFixed(4)
+                              : fromToken === "USDC"
+                              ? usdcBalance.toFixed(2)
+                              : "0.00"
+                          } ${fromToken}`
+                        : 'Connect wallet'
+                    }
                   </div>
                 </div>
 
@@ -377,14 +590,17 @@ export function TradeSection() {
 
                 {/* To Token */}
                 <div>
-                  <label className="block text-sm text-white/70 mb-2">To</label>
+                  <label className="block text-sm text-white/70 mb-2">
+                    To (Estimated)
+                  </label>
                   <div className="flex gap-2">
                     <Input
                       type="number"
                       placeholder="0.00"
                       value={toAmount}
-                      onChange={(e) => setToAmount(e.target.value)}
-                      className="flex-1"
+                      disabled
+                      readOnly
+                      className="flex-1 bg-white/5 cursor-not-allowed"
                     />
                     {/* Old static button - keeping for reference
                     <button className="px-4 py-2 bg-white/10 hover:bg-white/20 active:bg-white/30 rounded-md text-white font-medium transition-colors touch-manipulation">
@@ -436,75 +652,195 @@ export function TradeSection() {
                     </div>
                   </div>
                   <div className="text-xs text-white/40 mt-1">
-                    Balance: {isWalletConnected ? `${usdcBalance.toFixed(2)} ${toToken}` : "Connect wallet"}
+                    Balance: {
+                      isWalletConnected
+                        ? `${
+                            toToken === "SOL"
+                              ? solBalance.toFixed(4)
+                              : toToken === "USDC"
+                              ? usdcBalance.toFixed(2)
+                              : "0.00"
+                          } ${toToken}`
+                        : 'Connect wallet'
+                    }
+                  </div>
+                  <div className="text-xs text-purple-400/60 mt-1 flex items-center gap-1">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    Auto-calculated based on {orderType === "limit" ? "your limit price" : "market price"}
                   </div>
                 </div>
 
                 {/* Price Input (for limit orders) */}
                 {orderType === "limit" && (
                   <div>
-                    <label className="block text-sm text-white/70 mb-2">
-                      Limit Price ({toToken} per {fromToken})
-                    </label>
-                    <Input
-                      type="number"
-                      placeholder="Enter limit price (e.g., 100)"
+                    <label className="block text-sm text-white/70 mb-2">Limit Price (USDC per SOL)</label>
+                    <Input 
+                      type="number" 
+                      placeholder="100.00" 
                       value={limitPrice}
                       onChange={(e) => setLimitPrice(e.target.value)}
-                      className="w-full"
+                      className="w-full" 
                     />
                   </div>
                 )}
 
-                {/* Fee Info */}
-                <div className="bg-white/5 p-3 rounded-lg space-y-2 text-sm">
-                  <div className="flex justify-between text-white/60">
-                    <span>Exchange Rate</span>
-                    <span>1 SOL = 142.50 USDC</span>
-                  </div>
-                  <div className="flex justify-between text-white/60">
-                    <span>Fee</span>
-                    <span className="text-purple-400">0.1%</span>
+                {/* Current Market Price Info */}
+                <div className="bg-white/5 p-3 rounded-lg text-sm">
+                  <div className="flex justify-between items-center text-white/60">
+                    <span>Current Market Price</span>
+                    {isPriceLoading ? (
+                      <span className="text-white/40 text-xs">Loading...</span>
+                    ) : (
+                      <span className="text-purple-400 font-medium">
+                        {fromToken === "SOL" && toToken === "USDC" 
+                          ? `1 SOL = $${currentMarketPrice.toFixed(2)} USDC`
+                          : fromToken === "USDC" && toToken === "SOL"
+                          ? `1 USDC = ${(1 / currentMarketPrice).toFixed(6)} SOL`
+                          : `1 ${fromToken} = ${toToken}`
+                        }
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Action Button */}
-                <Button
-                  variant="default"
-                  size="lg"
-                  className="w-full"
-                  onClick={handleTrade}
-                  disabled={isLoading || !isWalletConnected}
-                >
-                  {isLoading
-                    ? "Processing..."
-                    : !isWalletConnected
-                    ? "Connect Wallet to Trade"
-                    : orderType === "limit"
-                    ? "Place Limit Order"
-                    : "Execute Market Order"}
-                </Button>
+                {/* Warning Banner for SOL/USDC only */}
+                {(fromToken !== "SOL" && fromToken !== "USDC") || (toToken !== "SOL" && toToken !== "USDC") ? (
+                  <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-3">
+                    <p className="text-xs text-orange-400 flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                      <span>Currently only SOL/USDC trading pair is supported. Please select SOL and USDC.</span>
+                    </p>
+                  </div>
+                ) : null}
+
+                {/* Action Button & Days Dropdown (Side by Side) */}
+                <div className="flex gap-3">
+                  {/* Place Order Button */}
+                  <Button 
+                    variant="default" 
+                    size="lg" 
+                    className={orderType === "limit" ? "flex-1" : "w-full"}
+                    onClick={handleTrade}
+                    disabled={isSubmitting || !isWalletConnected}
+                  >
+                    {isSubmitting 
+                      ? (
+                        <span className="flex items-center gap-2">
+                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          Submitting...
+                        </span>
+                      )
+                      : !isWalletConnected 
+                      ? "Connect Wallet to Trade" 
+                      : orderType === "limit" 
+                      ? (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Place Limit Order")
+                      : (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Execute Market Order")}
+                  </Button>
+
+                  {/* Expiration/Delay Dropdown - Only for Limit Orders */}
+                  {orderType === "limit" && (
+                    <div className="relative" ref={daysDropdownRef}>
+                      <button
+                        onClick={() => {
+                          setShowDaysDropdown(!showDaysDropdown)
+                          setShowFromDropdown(false)
+                          setShowToDropdown(false)
+                        }}
+                        className="h-full flex items-center gap-1.5 px-3 py-2 bg-white/10 hover:bg-white/15 border border-white/20 rounded-md text-white transition-colors whitespace-nowrap"
+                      >
+                        <span className="text-xs font-medium">
+                          {allowLiquidityPool
+                            ? `${fallbackSeconds}s`
+                            : (daysToKeepOpen === "0" ? "∞" : `${daysToKeepOpen}d`)
+                          }
+                        </span>
+                        <ChevronDown className="w-3 h-3" />
+                      </button>
+
+                      {showDaysDropdown && (
+                        <div className="absolute bottom-full right-0 mb-2 w-44 bg-black/95 backdrop-blur-xl border border-white/10 rounded-lg shadow-xl z-[200]">
+                          <div className="py-0.5">
+                            {allowLiquidityPool
+                              ? [
+                                  { value: "5", label: "5 Seconds" },
+                                  { value: "10", label: "10 Seconds" },
+                                  { value: "20", label: "20 Seconds" },
+                                  { value: "30", label: "30 Seconds" },
+                                  { value: "45", label: "45 Seconds" },
+                                  { value: "60", label: "60 Seconds" },
+                                  { value: "90", label: "90 Seconds" },
+                                ].map((option) => (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => {
+                                      setFallbackSeconds(option.value)
+                                      setShowDaysDropdown(false)
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
+                                      fallbackSeconds === option.value ? "bg-purple-500/20" : ""
+                                    }`}
+                                  >
+                                    <span className="text-white text-xs">{option.label}</span>
+                                    {fallbackSeconds === option.value && (
+                                      <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))
+                              : [
+                                  { value: "1", label: "1 Day" },
+                                  { value: "3", label: "3 Days" },
+                                  { value: "7", label: "7 Days" },
+                                  { value: "14", label: "14 Days" },
+                                  { value: "30", label: "30 Days" },
+                                  { value: "90", label: "90 Days" },
+                                  { value: "0", label: "Until Cancelled" },
+                                ].map((option) => (
+                                  <button
+                                    key={option.value}
+                                    onClick={() => {
+                                      setDaysToKeepOpen(option.value)
+                                      setShowDaysDropdown(false)
+                                    }}
+                                    className={`w-full flex items-center justify-between px-3 py-1.5 hover:bg-white/10 transition-colors text-left ${
+                                      daysToKeepOpen === option.value ? "bg-purple-500/20" : ""
+                                    }`}
+                                  >
+                                    <span className="text-white text-xs">{option.label}</span>
+                                    {daysToKeepOpen === option.value && (
+                                      <svg className="w-3 h-3 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                      </svg>
+                                    )}
+                                  </button>
+                                ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Price Charts - Desktop Second (shows second on mobile) */}
           <div className="lg:col-span-2 lg:order-1">
-            <Suspense fallback={
-              <Card className="glass">
-                <CardHeader>
-                  <Skeleton className="h-6 w-32" />
-                </CardHeader>
-                <CardContent>
-                  <Skeleton className="h-64 w-full" />
-                </CardContent>
-              </Card>
-            }>
-              <PriceCharts fromToken={fromToken} toToken={toToken} />
-            </Suspense>
+            <PriceCharts fromToken={fromToken} toToken={toToken} />
           </div>
         </div>
       </div>
     </section>
   )
+}
+
+// Helper to convert float to integer amount in minor units
+function toMinorUnits(amount: number, decimals: number): number {
+  return Math.floor(amount * Math.pow(10, decimals))
 }

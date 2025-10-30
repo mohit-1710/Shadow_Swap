@@ -1,287 +1,632 @@
-import { AnchorProvider, Program, Idl, BN } from "@coral-xyz/anchor";
-import { Connection, PublicKey, SystemProgram, SYSVAR_RENT_PUBKEY } from "@solana/web3.js";
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress } from "@solana/spl-token";
-import idl from "./idl/shadow_swap.json";
+/**
+ * ShadowSwap Client - Unified interface for interacting with the ShadowSwap program
+ */
 
-// Environment configuration
-const PROGRAM_ID = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!);
-const ORDER_BOOK = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK!);
-const BASE_MINT = new PublicKey(process.env.NEXT_PUBLIC_BASE_MINT!);
-const QUOTE_MINT = new PublicKey(process.env.NEXT_PUBLIC_QUOTE_MINT!);
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL!;
+import { Connection, PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY, SendTransactionError } from '@solana/web3.js';
+import { AnchorProvider, BN, Program, Idl } from '@coral-xyz/anchor';
+import { 
+  TOKEN_PROGRAM_ID, 
+  createSyncNativeInstruction, 
+  createCloseAccountInstruction,
+  NATIVE_MINT,
+  AccountLayout,
+} from '@solana/spl-token';
+import {
+  deriveOrderPda,
+  deriveEscrowPda,
+  deriveEscrowTokenAccountPda,
+  fetchOrderCount,
+  getProgramAsync,
+  ORDER_STATUS,
+} from './program';
+import {
+  getOrCreateAssociatedTokenAccount,
+  getTokenBalance,
+  tokenAccountExists,
+  formatTokenAmount,
+  parseTokenAmount,
+} from './tokenUtils';
+import { encryptOrderWithArcium, PlainOrder, validateOrder } from './arcium';
+
+const BASE_DECIMALS = 9; // SOL/WSOL (lamports)
+const QUOTE_DECIMALS = 6; // USDC (micro units)
 
 export interface OrderParams {
-  side: "buy" | "sell";
-  price: number;
-  amount: number;
+  side: 'buy' | 'sell';
+  amount: number; // in whole tokens (SOL or USDC)
+  price: number; // in USDC per SOL
+  expiresAt?: number; // Unix timestamp (seconds), 0 or undefined = never expires
 }
 
 export interface OrderData {
-  owner: PublicKey;
-  orderBook: PublicKey;
-  side: number;
-  price: BN;
-  baseAmount: BN;
-  quoteAmount: BN;
-  filledBaseAmount: BN;
-  filledQuoteAmount: BN;
+  publicKey: string;
+  owner: string;
+  orderId: string;
   status: number;
-  createdAt: BN;
-  lastUpdatedAt: BN;
-  bump: number;
+  createdAt: number;
 }
 
-export enum OrderStatus {
-  PENDING = 0,
-  PARTIALLY_FILLED = 1,
-  FILLED = 2,
-  CANCELLED = 3,
+export interface BalanceData {
+  sol: number;
+  usdc: number;
 }
 
-/**
- * ShadowSwap Client for interacting with the on-chain program
- */
+export interface OrderResult {
+  success: boolean;
+  signature?: string;
+  error?: string;
+}
+
 export class ShadowSwapClient {
   private connection: Connection;
-  private program: Program;
+  private provider: AnchorProvider;
+  private program: Program<Idl> | null = null;
+  private programId: PublicKey;
+  private orderBook: PublicKey;
+  private baseMint: PublicKey;
+  private quoteMint: PublicKey;
+  // Prevent duplicate sends in dev (Strict Mode double-invoke/Fast Refresh)
+  private _isSubmittingTx = false;
 
-  constructor(provider: AnchorProvider) {
+  constructor(
+    provider: AnchorProvider,
+    programId: PublicKey,
+    orderBook: PublicKey,
+    baseMint: PublicKey,
+    quoteMint: PublicKey
+  ) {
     this.connection = provider.connection;
-    this.program = new Program(idl as Idl, provider);
+    this.provider = provider;
+    this.programId = programId;
+    this.orderBook = orderBook;
+    this.baseMint = baseMint;
+    this.quoteMint = quoteMint;
   }
 
   /**
-   * Create a ShadowSwap client from a wallet
+   * Get user's WSOL balance (in SOL units)
    */
-  static fromWallet(wallet: any): ShadowSwapClient {
-    const connection = new Connection(RPC_URL, "confirmed");
-    const provider = new AnchorProvider(connection, wallet, {
-      commitment: "confirmed",
-    });
-    return new ShadowSwapClient(provider);
-  }
-
-  /**
-   * Mock encryption function - pads plaintext to look encrypted
-   * In production, this would use Arcium MPC
-   */
-  private mockEncrypt(data: string): Uint8Array {
-    const bytes = new TextEncoder().encode(data);
-    // Pad to 128 bytes to simulate encrypted payload
-    const padded = new Uint8Array(128);
-    padded.set(bytes);
-    return padded;
-  }
-
-  /**
-   * Submit an encrypted order to the orderbook
-   */
-  async submitOrder(params: OrderParams): Promise<string> {
-    const { side, price, amount } = params;
-    
-    // Convert to on-chain units (assuming 6 decimals for USDC, 9 for SOL)
-    const priceInLamports = Math.floor(price * 1_000_000); // USDC has 6 decimals
-    const baseAmount = Math.floor(amount * 1_000_000_000); // SOL has 9 decimals
-    const quoteAmount = Math.floor((price * amount) * 1_000_000); // USDC amount
-
-    // Create encrypted payload (mocked)
-    // NOTE: The price is included in the cipher_payload, not as a separate argument
-    const orderData = JSON.stringify({
-      side: side === "buy" ? 0 : 1,
-      price: priceInLamports,
-      amount: baseAmount,
-    });
-    const cipherPayload = Array.from(this.mockEncrypt(orderData));
-    const encryptedAmount = Array.from(this.mockEncrypt(baseAmount.toString()));
-
-    // Derive PDAs
-    const [orderPDA] = PublicKey.findProgramAddressSync(
-      [
-        Buffer.from("encrypted_order"),
-        ORDER_BOOK.toBuffer(),
-        this.program.provider.publicKey!.toBuffer(),
-        Buffer.from(new BN(Date.now()).toArray("le", 8)),
-      ],
-      PROGRAM_ID
-    );
-
-    const [escrowPDA] = PublicKey.findProgramAddressSync(
-      [Buffer.from("escrow"), orderPDA.toBuffer()],
-      PROGRAM_ID
-    );
-
-    // Get user token accounts
-    const userBaseAccount = side === "sell"
-      ? await getAssociatedTokenAddress(BASE_MINT, this.program.provider.publicKey!)
-      : await getAssociatedTokenAddress(BASE_MINT, this.program.provider.publicKey!);
-    
-    const userQuoteAccount = await getAssociatedTokenAddress(
-      QUOTE_MINT,
-      this.program.provider.publicKey!
-    );
-
-    // Get escrow token accounts
-    const escrowBaseAccount = await getAssociatedTokenAddress(BASE_MINT, escrowPDA, true);
-    const escrowQuoteAccount = await getAssociatedTokenAddress(QUOTE_MINT, escrowPDA, true);
-
+  async getWsolBalance(): Promise<number> {
     try {
-      // Submit the order
-      // Note: Only 2 args - cipher_payload and encrypted_amount
-      // The price is embedded in cipher_payload, not a separate parameter
-      const tx = await this.program.methods
-        .submitEncryptedOrder(
-          cipherPayload,
-          encryptedAmount
-        )
+      if (!this.provider.publicKey) return 0;
+      const wsolAta = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        NATIVE_MINT,
+        this.provider.publicKey,
+        this.provider.publicKey
+      );
+      const exists = await tokenAccountExists(this.connection, wsolAta);
+      if (!exists) return 0;
+      const bal = await getTokenBalance(this.connection, wsolAta);
+      return Number(bal) / Math.pow(10, BASE_DECIMALS);
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Close WSOL ATA to unwrap into native SOL
+   */
+  async unwrapWsol(): Promise<OrderResult> {
+    try {
+      if (!this.provider.publicKey) {
+        return { success: false, error: 'Wallet not connected' };
+      }
+      const owner = this.provider.publicKey;
+      const wsolAta = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        NATIVE_MINT,
+        owner,
+        owner
+      );
+      const exists = await tokenAccountExists(this.connection, wsolAta);
+      if (!exists) {
+        return { success: false, error: 'No WSOL account to close' };
+      }
+
+      // Build close instruction
+      const tx = new Transaction();
+      tx.add(createCloseAccountInstruction(wsolAta, owner, owner));
+      tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+      tx.feePayer = owner;
+
+      const signed = await this.provider.wallet.signTransaction(tx);
+      const sig = await this.connection.sendRawTransaction(signed.serialize(), { maxRetries: 3 });
+      await this.connection.confirmTransaction(sig, 'confirmed');
+      return { success: true, signature: sig };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to unwrap WSOL' };
+    }
+  }
+
+  /**
+   * Initialize the program instance
+   */
+  async initialize(): Promise<void> {
+    if (!this.program) {
+      this.program = await getProgramAsync(this.connection, this.provider.wallet);
+    }
+  }
+
+  /**
+   * Submit an order to the blockchain
+   */
+  async submitOrder(params: OrderParams): Promise<OrderResult> {
+    try {
+      if (this._isSubmittingTx) {
+        console.log('⏳ submitOrder ignored: previous submission in-flight');
+        return { success: false, error: 'Submission in progress' };
+      }
+      this._isSubmittingTx = true;
+      await this.initialize();
+      if (!this.program || !this.provider.publicKey) {
+        return { success: false, error: 'Program not initialized or wallet not connected' };
+      }
+
+      const { side, amount, price } = params;
+
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+      console.log('📝 SUBMIT ORDER - Input Parameters:');
+      console.log('   Side:', side);
+      console.log('   Amount (UI):', amount);
+      console.log('   Price (UI):', price);
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      // Standardize: plain order "amount" is ALWAYS base (SOL) in lamports
+      const baseLamports = Math.floor(amount * Math.pow(10, BASE_DECIMALS));
+      
+      const priceLamports = Math.floor(price * Math.pow(10, QUOTE_DECIMALS));
+      // Amount to escrow (posted_amount) depends on side
+      const postedAmount: number = side === 'buy'
+        ? Math.floor((amount * price) * Math.pow(10, QUOTE_DECIMALS)) // quote amount
+        : baseLamports; // base amount
+
+      console.log('💰 Converted Amounts:');
+      console.log('   Base amount (lamports):', baseLamports, `(${baseLamports / 1e9} SOL)`);
+      console.log('   Price (lamports):', priceLamports, `(${priceLamports / 1e6} USDC)`);
+      console.log('   Posted (escrow) amount:', postedAmount, side === 'buy' ? '(USDC micro-units)' : '(lamports)');
+      console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+
+      // Create plain order
+      const plainOrder: PlainOrder = {
+        side: side === 'buy' ? 0 : 1,
+        amount: baseLamports, // always base units in cipher
+        price: priceLamports,
+        timestamp: Math.floor(Date.now() / 1000),
+      };
+
+      // Validate order
+      const validation = validateOrder(plainOrder);
+      if (!validation.valid) {
+        return { success: false, error: validation.error };
+      }
+
+      // Encrypt order
+      const encryptedOrder = await encryptOrderWithArcium(plainOrder, this.orderBook);
+
+      // Get order count - pass program instance for proper deserialization
+      const orderCount = await fetchOrderCount(this.connection, this.orderBook, this.program);
+
+      console.log('Current order count:', orderCount.toString());
+
+      // Derive PDAs
+      const [orderPda] = deriveOrderPda(this.orderBook, orderCount, this.programId);
+      console.log('Derived order PDA:', orderPda.toString());
+      const [escrowPda] = deriveEscrowPda(orderPda, this.programId);
+      const [escrowTokenPda] = deriveEscrowTokenAccountPda(orderPda, this.programId);
+
+      // Determine which token we're depositing
+      const tokenMint = side === 'buy' ? this.quoteMint : this.baseMint;
+
+      // Create transaction
+      const transaction = new Transaction();
+
+      // Get or create user token account
+      const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        tokenMint,
+        this.provider.publicKey,
+        this.provider.publicKey,
+        transaction
+      );
+
+      // If selling, we need to wrap SOL first
+      if (side === 'sell') {
+        // Add wrap SOL instruction
+        const wrapAmount = BigInt(baseLamports) + BigInt(2_039_280); // Add rent for token account
+        
+        console.log('🔄 Wrapping SOL:');
+        console.log('   User Token Account:', userTokenAccount.toString());
+        console.log('   Amount to wrap:', baseLamports, 'lamports');
+        console.log('   Rent reserve:', 2_039_280, 'lamports');
+        console.log('   Total wrap amount:', Number(wrapAmount), 'lamports', `(${Number(wrapAmount) / 1e9} SOL)`);
+        console.log('   From wallet:', this.provider.publicKey.toString());
+        
+        transaction.add(
+          SystemProgram.transfer({
+            fromPubkey: this.provider.publicKey,
+            toPubkey: userTokenAccount,
+            lamports: Number(wrapAmount),
+          })
+        );
+        transaction.add(createSyncNativeInstruction(userTokenAccount));
+        
+        console.log('✅ Wrap instructions added to transaction');
+      }
+
+      // Prepare cipher payload and encrypted amount buffers
+      // Convert Uint8Array to Buffer for Anchor compatibility
+      const cipherPayloadBuffer = Buffer.from(encryptedOrder.cipherPayload);
+      
+      // Ensure it's exactly 512 bytes (pad if needed)
+      const paddedCipherPayload = Buffer.alloc(512);
+      cipherPayloadBuffer.copy(paddedCipherPayload, 0, 0, Math.min(cipherPayloadBuffer.length, 512));
+
+      // Create encrypted amount buffer (64 bytes to match MAX_ENCRYPTED_AMOUNT_SIZE)
+      const encryptedAmountBuffer = Buffer.alloc(64);
+      const amountBytes = Buffer.from(baseLamports.toString(), 'utf-8');
+      amountBytes.copy(encryptedAmountBuffer, 0, 0, Math.min(amountBytes.length, 64));
+
+      console.log('📤 Building submit order instruction:');
+      console.log('   Order PDA:', orderPda.toString());
+      console.log('   Escrow PDA:', escrowPda.toString());
+      console.log('   Escrow Token Account:', escrowTokenPda.toString());
+      console.log('   User Token Account:', userTokenAccount.toString());
+      console.log('   Token Mint:', tokenMint.toString());
+      console.log('   Owner:', this.provider.publicKey.toString());
+
+      // Build submit order instruction
+      const submitOrderIx = await this.program.methods
+        .submitEncryptedOrder(paddedCipherPayload, encryptedAmountBuffer, new BN(postedAmount))
         .accounts({
-          order: orderPDA,
-          orderBook: ORDER_BOOK,
-          user: this.program.provider.publicKey!,
-          escrow: escrowPDA,
-          userTokenAccount: side === "buy" ? userQuoteAccount : userBaseAccount,
-          escrowTokenAccount: side === "buy" ? escrowQuoteAccount : escrowBaseAccount,
+          orderBook: this.orderBook,
+          order: orderPda,
+          escrow: escrowPda,
+          escrowTokenAccount: escrowTokenPda,
+          userTokenAccount: userTokenAccount,
+          tokenMint: tokenMint,
+          owner: this.provider.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
           rent: SYSVAR_RENT_PUBKEY,
         })
-        .rpc();
+        .instruction();
 
-      return tx;
+      transaction.add(submitOrderIx);
+      
+      console.log('✅ Submit order instruction added');
+      console.log('📦 Total instructions in transaction:', transaction.instructions.length);
+
+      // Manually handle blockhash, signing, and confirmation to prevent stale transactions
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = this.provider.publicKey;
+
+      const signedTx = await this.provider.wallet.signTransaction(transaction);
+      const signature = await this.connection.sendRawTransaction(signedTx.serialize(), {
+        skipPreflight: true,
+        preflightCommitment: 'confirmed',
+        maxRetries: 3,
+      });
+
+      await this.connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      }, 'confirmed');
+
+      console.log('Order submitted successfully with signature:', signature);
+      return { success: true, signature };
     } catch (error: any) {
-      console.error("Error submitting order:", error);
-      throw new Error(error.message || "Failed to submit order");
+      // Handle user rejection gracefully
+      if (error?.message?.includes('User rejected') || error?.name === 'WalletSignTransactionError') {
+        console.log('User cancelled transaction signing');
+        return { success: false, error: 'Transaction cancelled by user' };
+      }
+
+      // Treat duplicate re-send as success and avoid noisy error logs
+      if (
+        error?.message?.includes('already been processed') ||
+        error?.message?.includes('AlreadyProcessed') ||
+        error?.message?.includes('This transaction has already been processed')
+      ) {
+        console.log('⚠️ Transaction already processed - treating as success');
+        const sig = error?.signature || error?.txid || 'processed';
+        return { success: true, signature: sig };
+      }
+
+      if (error instanceof SendTransactionError) {
+        console.error('Transaction Logs:', error.logs);
+      }
+      console.error('Error submitting order:', error);
+
+      // Return meaningful error message
+      let errorMessage = 'Failed to submit order';
+      if (error?.message?.includes('insufficient lamports') || error?.message?.includes('insufficient funds')) {
+        const match = error.message.match(/insufficient lamports (\d+), need (\d+)/);
+        if (match) {
+          const have = (parseInt(match[1]) / 1e9).toFixed(4);
+          const need = (parseInt(match[2]) / 1e9).toFixed(4);
+          errorMessage = `Insufficient balance. You have ${have} SOL but need ${need} SOL (including transaction fees and rent).`;
+        } else {
+          errorMessage = 'Insufficient balance. Please reduce the amount or add more SOL to your wallet.';
+        }
+      } else if (error?.message?.includes('Simulation failed')) {
+        errorMessage = 'Transaction simulation failed. Please try again.';
+      } else if (error?.message) {
+        errorMessage = error.message;
+      }
+      return { success: false, error: errorMessage };
+    } finally {
+      this._isSubmittingTx = false;
     }
   }
 
   /**
-   * Fetch all orders for the current user
+   * Fetch user's orders
    */
   async fetchUserOrders(): Promise<OrderData[]> {
     try {
-      const orders = await this.program.account.encryptedOrder.all([
+      await this.initialize();
+      if (!this.program || !this.provider.publicKey) {
+        return [];
+      }
+
+      // Fetch orders by owner
+      const orders = await (this.program.account as any).encryptedOrder.all([
         {
           memcmp: {
-            offset: 8, // Discriminator
-            bytes: this.program.provider.publicKey!.toBase58(),
+            offset: 8, // After discriminator
+            bytes: this.provider.publicKey.toBase58(),
           },
         },
       ]);
 
-      return orders.map((order) => order.account as unknown as OrderData);
+      return orders.map((order: any) => ({
+        publicKey: order.publicKey.toString(),
+        owner: order.account.owner.toString(),
+        orderId: order.account.orderId.toString(),
+        status: order.account.status,
+        createdAt: order.account.createdAt.toNumber(),
+      }));
     } catch (error) {
-      console.error("Error fetching user orders:", error);
+      console.error('Error fetching user orders:', error);
       return [];
     }
   }
 
   /**
-   * Fetch all active orders from the orderbook
+   * Get user balances
    */
-  async fetchAllOrders(): Promise<OrderData[]> {
+  async getBalances(): Promise<BalanceData> {
     try {
-      const orders = await this.program.account.encryptedOrder.all([
-        {
-          memcmp: {
-            offset: 8 + 32, // Discriminator + owner pubkey
-            bytes: ORDER_BOOK.toBase58(),
-          },
-        },
-      ]);
+      if (!this.provider.publicKey) {
+        console.error('❌ No public key available for balance check');
+        return { sol: 0, usdc: 0 };
+      }
 
-      return orders.map((order) => order.account as unknown as OrderData);
-    } catch (error) {
-      console.error("Error fetching orders:", error);
-      return [];
-    }
-  }
+      console.log('💰 Fetching balances for:', this.provider.publicKey.toString());
 
-  /**
-   * Cancel an existing order
-   */
-  async cancelOrder(orderPDA: PublicKey): Promise<string> {
-    try {
-      const [escrowPDA] = PublicKey.findProgramAddressSync(
-        [Buffer.from("escrow"), orderPDA.toBuffer()],
-        PROGRAM_ID
+      // Get native SOL balance
+      const solBalance = await this.connection.getBalance(this.provider.publicKey);
+      let sol = solBalance / Math.pow(10, BASE_DECIMALS);
+      console.log('   Native SOL balance:', sol, 'SOL');
+
+      // Include WSOL balance (from associated token account) so filled orders show up as SOL
+      try {
+        const wsolAta = await getOrCreateAssociatedTokenAccount(
+          this.connection,
+          NATIVE_MINT,
+          this.provider.publicKey,
+          this.provider.publicKey
+        );
+        const wsolBalance = await getTokenBalance(this.connection, wsolAta);
+        const wsol = Number(wsolBalance) / Math.pow(10, BASE_DECIMALS);
+        if (wsol > 0) {
+          console.log('   Wrapped SOL (WSOL) balance:', wsol, 'SOL');
+          sol += wsol; // present combined SOL (native + wrapped)
+        }
+      } catch (_) {
+        // ignore errors and just show native SOL
+      }
+
+      // Get USDC balance
+      const usdcAta = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        this.quoteMint,
+        this.provider.publicKey,
+        this.provider.publicKey
       );
+      const usdcBalance = await getTokenBalance(this.connection, usdcAta);
+      const usdc = Number(usdcBalance) / Math.pow(10, QUOTE_DECIMALS);
+      console.log('   USDC balance:', usdc, 'USDC');
 
-      const orderAccount = await this.program.account.encryptedOrder.fetch(orderPDA);
+      console.log('✅ Final balances - SOL:', sol, 'USDC:', usdc);
+
+      return { 
+        sol: sol, // Only show native SOL
+        usdc 
+      };
+    } catch (error) {
+      console.error('❌ Error fetching balances:', error);
+      return { sol: 0, usdc: 0 };
+    }
+  }
+
+  /**
+   * Cancel an order
+   */
+  async cancelOrder(orderAddress: PublicKey): Promise<OrderResult> {
+    try {
+      await this.initialize();
+      if (!this.program || !this.provider.publicKey) {
+        return { success: false, error: 'Program not initialized or wallet not connected' };
+      }
+
+      // Fetch order account
+      const orderAccount = await (this.program.account as any).encryptedOrder.fetch(orderAddress);
       
-      // Determine which token account to refund to based on order side
-      const userTokenAccount = await getAssociatedTokenAddress(
-        orderAccount.side === 0 ? QUOTE_MINT : BASE_MINT,
-        this.program.provider.publicKey!
+      // Check if order can be cancelled (must be ACTIVE or PARTIAL)
+      const canCancel = orderAccount.status === ORDER_STATUS.ACTIVE || orderAccount.status === ORDER_STATUS.PARTIAL;
+      
+      if (!canCancel) {
+        const statusText = this.getOrderStatusText(orderAccount.status);
+        return { 
+          success: false, 
+          error: `Cannot cancel order - current status: ${statusText}. The order may have already been filled or cancelled.` 
+        };
+      }
+      
+      // Derive PDAs
+      const [escrowPda] = deriveEscrowPda(orderAddress, this.programId);
+      const [escrowTokenPda] = deriveEscrowTokenAccountPda(orderAddress, this.programId);
+
+      // Fetch the escrow token account to check what mint it holds
+      const escrowTokenAccountInfo = await this.connection.getAccountInfo(escrowTokenPda);
+      if (!escrowTokenAccountInfo) {
+        return { success: false, error: 'Escrow token account not found' };
+      }
+
+      // Parse the token account to get the mint
+      const escrowTokenData = AccountLayout.decode(escrowTokenAccountInfo.data);
+      const tokenMint = new PublicKey(escrowTokenData.mint);
+
+      console.log('Cancelling order:', {
+        orderAddress: orderAddress.toString(),
+        orderBook: this.orderBook.toString(),
+        escrow: escrowPda.toString(),
+        escrowTokenAccount: escrowTokenPda.toString(),
+        tokenMint: tokenMint.toString(),
+        orderSide: orderAccount.side,
+        owner: this.provider.publicKey.toString(),
+      });
+
+      // Create transaction
+      const transaction = new Transaction();
+
+      // Get or create user token account for refund
+      const userTokenAccount = await getOrCreateAssociatedTokenAccount(
+        this.connection,
+        tokenMint,
+        this.provider.publicKey,
+        this.provider.publicKey,
+        transaction
       );
 
-      const escrowTokenAccount = await getAssociatedTokenAddress(
-        orderAccount.side === 0 ? QUOTE_MINT : BASE_MINT,
-        escrowPDA,
-        true
-      );
+      console.log('User token account:', userTokenAccount.toString());
 
-      const tx = await this.program.methods
+      // Build cancel instruction
+      const cancelIx = await this.program.methods
         .cancelOrder()
         .accounts({
-          order: orderPDA,
-          escrow: escrowPDA,
-          user: this.program.provider.publicKey!,
-          userTokenAccount,
-          escrowTokenAccount,
+          order: orderAddress,
+          escrow: escrowPda,
+          escrowTokenAccount: escrowTokenPda,
+          userTokenAccount: userTokenAccount,
+          orderBook: this.orderBook,
+          owner: this.provider.publicKey,
           tokenProgram: TOKEN_PROGRAM_ID,
         })
-        .rpc();
+        .instruction();
 
-      return tx;
+      transaction.add(cancelIx);
+
+      // If refunding wSOL, add instruction to close the wSOL account and recover rent
+      if (tokenMint.equals(NATIVE_MINT)) {
+        console.log('Adding instruction to close WSOL account');
+        const closeWsolIx = createCloseAccountInstruction(
+          userTokenAccount,
+          this.provider.publicKey,
+          this.provider.publicKey
+        );
+        transaction.add(closeWsolIx);
+      }
+
+      // Manually handle blockhash, signing, and confirmation
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      transaction.recentBlockhash = blockhash;
+      transaction.feePayer = this.provider.publicKey;
+
+      const signedTx = await this.provider.wallet.signTransaction(transaction);
+      const signature = await this.connection.sendRawTransaction(signedTx.serialize());
+
+      await this.connection.confirmTransaction({
+        signature,
+        blockhash,
+        lastValidBlockHeight,
+      }, 'confirmed');
+
+      console.log('Order cancelled successfully:', signature);
+
+      return { success: true, signature };
     } catch (error: any) {
-      console.error("Error cancelling order:", error);
-      throw new Error(error.message || "Failed to cancel order");
-    }
-  }
-
-  /**
-   * Get SPL token balance for a user
-   */
-  async getTokenBalance(mint: PublicKey, owner?: PublicKey): Promise<number> {
-    try {
-      const ownerPubkey = owner || this.program.provider.publicKey!;
-      const tokenAccount = await getAssociatedTokenAddress(mint, ownerPubkey);
+      console.error('Error cancelling order:', error);
       
-      const balance = await this.connection.getTokenAccountBalance(tokenAccount);
-      return parseFloat(balance.value.uiAmount?.toString() || "0");
-    } catch (error) {
-      console.error("Error fetching token balance:", error);
-      return 0;
+      if (error instanceof SendTransactionError) {
+        console.error('Transaction Logs:', error.logs);
+      }
+
+      // Handle user rejection gracefully
+      if (error.message?.includes('User rejected') || error.name === 'WalletSignTransactionError') {
+        console.log('User cancelled transaction signing');
+        return { 
+          success: false, 
+          error: 'Cancellation cancelled by user' 
+        };
+      }
+      
+      // Check for specific error codes
+      if (error.message?.includes('InvalidOrderStatus')) {
+        return { 
+          success: false, 
+          error: 'Order status changed - it may have been filled or already cancelled. Please refresh to see the latest status.' 
+        };
+      }
+      
+      // If transaction already processed, treat as success (avoid showing error)
+      if (error.message?.includes('already been processed') || 
+          error.message?.includes('AlreadyProcessed') ||
+          error.message?.includes('This transaction has already been processed')) {
+        console.log('⚠️ Transaction already processed - order was successfully cancelled');
+        return { 
+          success: true, 
+          signature: 'already-processed' 
+        };
+      }
+      
+      // Return meaningful error message
+      let errorMessage = 'Failed to cancel order';
+      if (error.message?.includes('Simulation failed')) {
+        errorMessage = 'Cancellation failed. Please refresh and try again.';
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      return { 
+        success: false, 
+        error: errorMessage
+      };
     }
   }
 
   /**
-   * Get SOL balance
+   * Get human-readable order status text
    */
-  async getSolBalance(owner?: PublicKey): Promise<number> {
-    try {
-      const ownerPubkey = owner || this.program.provider.publicKey!;
-      const balance = await this.connection.getBalance(ownerPubkey);
-      return balance / 1_000_000_000; // Convert lamports to SOL
-    } catch (error) {
-      console.error("Error fetching SOL balance:", error);
-      return 0;
-    }
-  }
-
-  /**
-   * Get orderbook data
-   */
-  async getOrderBook() {
-    try {
-      const orderBook = await this.program.account.orderBook.fetch(ORDER_BOOK);
-      return orderBook;
-    } catch (error) {
-      console.error("Error fetching orderbook:", error);
-      return null;
+  private getOrderStatusText(status: number): string {
+    switch (status) {
+      case ORDER_STATUS.ACTIVE:
+        return "Active"
+      case ORDER_STATUS.PARTIAL:
+        return "Partially Filled"
+      case ORDER_STATUS.FILLED:
+      case ORDER_STATUS.EXECUTED:
+        return "Filled"
+      case ORDER_STATUS.CANCELLED:
+        return "Cancelled"
+      case ORDER_STATUS.MATCHED_PENDING:
+        return "Matching"
+      default:
+        return "Unknown"
     }
   }
 }
-
-// Export constants for use in components
-export { PROGRAM_ID, ORDER_BOOK, BASE_MINT, QUOTE_MINT, RPC_URL };
-

@@ -28,9 +28,11 @@ export function Hero() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4 mb-12">
-          <Button size="lg" variant="default" className="cursor-pointer hover:scale-105 transition-transform">
-            Launch App
-          </Button>
+          <Link href="/trade">
+            <Button size="lg" variant="default" className="cursor-pointer hover:scale-105 transition-transform">
+              Start Trade
+            </Button>
+          </Link>
           
           {/* Old: Static button without link - keeping for reference
           <Button size="lg" variant="outline" className="cursor-pointer hover:scale-105 transition-transform">

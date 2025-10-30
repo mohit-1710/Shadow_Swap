@@ -1,13 +1,14 @@
 "use client"
 
-import { createContext, useContext, useMemo, ReactNode } from "react"
+import { createContext, useContext, ReactNode, useMemo } from "react"
 import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react"
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets"
 import { clusterApiUrl } from "@solana/web3.js"
+
+// Import wallet adapter styles
 import "@solana/wallet-adapter-react-ui/styles.css"
 
-// Get RPC URL from environment
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl("devnet")
 
 interface WalletContextType {
@@ -15,52 +16,54 @@ interface WalletContextType {
   walletAddress: string | null
   connectWallet: () => Promise<boolean>
   disconnectWallet: () => void
-  wallet: ReturnType<typeof useSolanaWallet>
+  wallet: ReturnType<typeof useSolanaWallet> | null
 }
 
 const WalletContext = createContext<WalletContextType | undefined>(undefined)
 
 /**
- * Internal wrapper that provides our custom wallet context
+ * Inner provider that uses the Solana wallet adapter
  */
 function WalletContextProvider({ children }: { children: ReactNode }) {
-  const solanaWallet = useSolanaWallet()
-
-  const isWalletConnected = solanaWallet.connected
-  const walletAddress = solanaWallet.publicKey?.toBase58() || null
+  const wallet = useSolanaWallet()
+  const { connected, publicKey, disconnect, select, wallets } = wallet
 
   const connectWallet = async (): Promise<boolean> => {
     try {
-      if (!solanaWallet.wallet) {
-        // If no wallet selected, open the modal
-        solanaWallet.select(null)
-        return false
+      // If not connected, try to select and connect
+      if (!connected && wallets.length > 0) {
+        // Try Phantom first
+        const phantomWallet = wallets.find(w => w.adapter.name === 'Phantom')
+        if (phantomWallet) {
+          select(phantomWallet.adapter.name)
+          await phantomWallet.adapter.connect()
+          return true
+        }
+        
+        // Fallback to first available wallet
+        select(wallets[0].adapter.name)
+        await wallets[0].adapter.connect()
+        return true
       }
-      
-      await solanaWallet.connect()
-      return true
+      return connected
     } catch (error) {
       console.error("Error connecting wallet:", error)
       return false
     }
   }
 
-  const disconnectWallet = async () => {
-    try {
-      await solanaWallet.disconnect()
-    } catch (error) {
-      console.error("Error disconnecting wallet:", error)
-    }
+  const disconnectWallet = () => {
+    disconnect()
   }
 
   return (
     <WalletContext.Provider
       value={{
-        isWalletConnected,
-        walletAddress,
+        isWalletConnected: connected,
+        walletAddress: publicKey?.toString() || null,
         connectWallet,
         disconnectWallet,
-        wallet: solanaWallet,
+        wallet,
       }}
     >
       {children}
@@ -69,10 +72,9 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Main wallet provider that sets up Solana wallet adapters
+ * Main wallet provider that wraps Solana wallet adapter
  */
 export function WalletProvider({ children }: { children: ReactNode }) {
-  // Configure supported wallets
   const wallets = useMemo(
     () => [
       new PhantomWalletAdapter(),
@@ -85,18 +87,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     <ConnectionProvider endpoint={RPC_URL}>
       <SolanaWalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <WalletContextProvider>
-            {children}
-          </WalletContextProvider>
+          <WalletContextProvider>{children}</WalletContextProvider>
         </WalletModalProvider>
       </SolanaWalletProvider>
     </ConnectionProvider>
   )
 }
 
-/**
- * Hook to access wallet context
- */
 export function useWallet() {
   const context = useContext(WalletContext)
   if (context === undefined) {
@@ -104,4 +101,3 @@ export function useWallet() {
   }
   return context
 }
-

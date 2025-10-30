@@ -328,53 +328,82 @@ class ShadowSwapKeeper {
   private async submitMatches(matches: MatchedPair[]): Promise<void> {
     console.log(`\n📤 Submitting ${matches.length} matches for settlement...`);
 
-    const transactions: Transaction[] = [];
+    let successful = 0;
+    let failed = 0;
+    const failures: string[] = [];
 
-    // Build transactions for each match
+    // Track orders that have been settled this cycle to avoid duplicate attempts
+    const settledOrderSet = new Set<string>();
+
+    // Submit sequentially so we can adapt to status changes
     for (const match of matches) {
-      if (match.matchedAmount <= 0n) {
-        console.warn('   ⚠️  Skipping match with zero amount');
+      const buyKey = match.buyOrder.publicKey.toString();
+      const sellKey = match.sellOrder.publicKey.toString();
+
+      if (match.matchedAmount <= 0n || match.executionPrice <= 0n) {
+        console.warn('   ⚠️  Skipping invalid match (amount/price)');
         continue;
       }
-      if (match.executionPrice <= 0n) {
-        console.warn('   ⚠️  Skipping match with zero price');
+
+      if (settledOrderSet.has(buyKey) || settledOrderSet.has(sellKey)) {
+        console.log(`   ⏭️  Skipping match; order already settled in this cycle (buyer ${match.buyOrder.orderId}, seller ${match.sellOrder.orderId})`);
+        continue;
+      }
+
+      // Verify on-chain status before building
+      const ok = await this.ordersAreActive(match);
+      if (!ok) {
+        console.log(`   ⏭️  Skipping match; order status not ACTIVE/PARTIAL (buyer ${match.buyOrder.orderId}, seller ${match.sellOrder.orderId})`);
         continue;
       }
 
       try {
         const tx = await this.buildSettlementTransaction(match);
-        transactions.push(tx);
-      } catch (error) {
-        this.logError(`Error building transaction for match`, error);
+        const res = await this.sanctumClient.submitTransaction(tx, this.config.maxRetries);
+        if (res.signature) {
+          console.log(
+            `   🎉 Completed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} at ${match.executionPrice} (tx ${res.signature})`
+          );
+          successful++;
+          settledOrderSet.add(buyKey);
+          settledOrderSet.add(sellKey);
+        } else {
+          const msg = res.error || 'Unknown submission error';
+          console.log(
+            `   ❌ Failed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} :: ${msg}`
+          );
+          failed++;
+          failures.push(msg);
+        }
+      } catch (error: any) {
+        const msg = error?.message || 'Build/submit error';
+        console.log(
+          `   ❌ Failed: buy order ${match.buyOrder.orderId} ↔ sell order ${match.sellOrder.orderId} :: ${msg}`
+        );
+        failed++;
+        failures.push(msg);
       }
     }
-
-    if (transactions.length === 0) {
-      console.log('   ⚠️  No transactions to submit');
-      return;
-    }
-
-    // Submit via Sanctum (MEV protected)
-    const results = await this.sanctumClient.submitBatch(
-      transactions,
-      this.config.maxRetries
-    );
-
-    // Log results
-    const successful = results.filter(r => r.signature).length;
-    const failed = results.filter(r => r.error).length;
 
     console.log(`\n📊 Settlement Results:`);
     console.log(`   ✅ Successful: ${successful}`);
     console.log(`   ❌ Failed:     ${failed}`);
-
     if (failed > 0) {
       console.log(`\n   Failed transactions:`);
-      results.forEach((result, idx) => {
-        if (result.error) {
-          console.log(`      ${idx + 1}. ${result.error}`);
-        }
-      });
+      failures.forEach((f, i) => console.log(`      ${i + 1}. ${f}`));
+    }
+  }
+
+  private async ordersAreActive(match: MatchedPair): Promise<boolean> {
+    try {
+      const buyerOrder = await (this.program.account as any).encryptedOrder.fetch(match.buyOrder.publicKey);
+      const sellerOrder = await (this.program.account as any).encryptedOrder.fetch(match.sellOrder.publicKey);
+      // 1 = ACTIVE, 2 = PARTIAL
+      const isActive = (s: number) => s === 1 || s === 2;
+      return isActive(buyerOrder.status) && isActive(sellerOrder.status);
+    } catch (e) {
+      console.warn('   ⚠️  Unable to fetch order status before submit:', e);
+      return false;
     }
   }
 
@@ -567,17 +596,93 @@ class ShadowSwapKeeper {
   }
 
   private loadProgram(): Program<Idl> {
-    // Load IDL from anchor_program
-    const idlPath = path.join(
-      __dirname,
-      '../../anchor_program/target/idl/shadow_swap.json'
+    const idlPath = this.resolveIdlPath();
+
+    let idl: Idl;
+    try {
+      idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
+    } catch (error) {
+      const reason =
+        error instanceof Error ? error.message : 'unknown read error';
+      throw new Error(
+        `Failed to read ShadowSwap IDL at ${idlPath}: ${reason}`
+      );
+    }
+
+    const configuredProgramId = this.config.programId?.trim();
+    const idlWithAddress = idl as Idl & {
+      address?: string;
+      metadata?: { address?: string; [key: string]: any };
+    };
+    const idlAddresses = [
+      idlWithAddress.address,
+      idlWithAddress.metadata?.address,
+    ].filter((value): value is string => Boolean(value));
+
+    if (!configuredProgramId && idlAddresses.length === 0) {
+      throw new Error(
+        'No program ID configured. Set PROGRAM_ID in the environment or ensure the IDL contains an address.'
+      );
+    }
+
+    const programId = new PublicKey(
+      configuredProgramId || (idlAddresses[0] as string)
+    ).toBase58();
+
+    if (
+      idlAddresses.length > 0 &&
+      !idlAddresses.every((address) => address === programId)
+    ) {
+      throw new Error(
+        `Program ID mismatch. Config reports ${configuredProgramId}, but IDL contains ${idlAddresses.join(
+          ', '
+        )}.`
+      );
+    }
+
+    idlWithAddress.address = programId;
+    idlWithAddress.metadata = {
+      ...(idlWithAddress.metadata ?? {}),
+      address: programId,
+    };
+
+    return new Program(idlWithAddress, this.provider);
+  }
+
+  private resolveIdlPath(): string {
+    const repoRoot = path.resolve(__dirname, '../../..');
+    const candidatePaths = Array.from(
+      new Set(
+        [
+          this.config.idlPath,
+          process.env.SHADOW_SWAP_IDL_PATH,
+          process.env.IDL_PATH,
+          path.resolve(__dirname, '../../anchor_program/target/idl/shadow_swap.json'),
+          path.join(repoRoot, 'apps/anchor_program/target/idl/shadow_swap.json'),
+          path.join(process.cwd(), '../anchor_program/target/idl/shadow_swap.json'),
+        ].filter((value): value is string => Boolean(value))
+      )
     );
-    
-    const idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
-    
-    return new Program(
-      idl,
-      this.provider
+
+    const checked: string[] = [];
+
+    for (const candidate of candidatePaths) {
+      const resolved = path.isAbsolute(candidate)
+        ? candidate
+        : path.resolve(candidate);
+      checked.push(resolved);
+
+      if (fs.existsSync(resolved)) {
+        return resolved;
+      }
+    }
+
+    throw new Error(
+      [
+        'ShadowSwap IDL not found.',
+        'Run "yarn anchor:build" to generate the IDL or set SHADOW_SWAP_IDL_PATH to an existing shadow_swap.json.',
+        `Checked paths: ${checked.join(', ') || 'none'}`,
+      ].join(' ')
     );
   }
 
@@ -617,22 +722,68 @@ class ShadowSwapKeeper {
 
   private createSanctumClient(): SanctumClient {
     const useMock = process.env.USE_MOCK_SANCTUM === 'true';
-    const useDirect = process.env.USE_DIRECT_RPC !== 'false'; // Default to true for testing
-    
-    const config = {
+    const sanctumConfig = {
       gatewayUrl: this.config.sanctumGatewayUrl,
       apiKey: this.config.sanctumApiKey,
     };
 
     if (useMock) {
-      return new MockSanctumClient(config);
-    } else if (useDirect) {
-      console.log('🚀 Using Direct RPC submission (no MEV protection)');
-      return new DirectRPCClient(config, this.connection);
-    } else {
-      console.log('🔒 Using Sanctum Gateway (MEV protected)');
-      return new SanctumClient(config);
+      return new MockSanctumClient(sanctumConfig);
     }
+
+    // Devnet builds send directly to public RPC; mainnet switches to Sanctum's private gateway.
+    const shouldUseGateway = this.shouldUseSanctumGateway();
+
+    if (!shouldUseGateway) {
+      const directRpcUrls = this.getDirectRpcUrls();
+      const primaryRpcUrl = directRpcUrls[0] ?? this.config.rpcUrl;
+
+      console.log('🚀 Using direct RPC submission for development (no MEV protection)');
+      console.log(`   Primary RPC endpoint: ${primaryRpcUrl}`);
+      if (directRpcUrls.length > 1) {
+        console.log(`   Fallback RPC endpoints: ${directRpcUrls.slice(1).join(', ')}`);
+      }
+
+      const directConnection = this.buildDirectRpcConnection(primaryRpcUrl);
+      return new DirectRPCClient(sanctumConfig, directConnection);
+    }
+
+    console.log('🔒 Using Sanctum Gateway (private-only MEV protection enabled)');
+    return new SanctumClient(sanctumConfig);
+  }
+
+  private buildDirectRpcConnection(endpoint: string): Connection {
+    if (endpoint === this.config.rpcUrl) {
+      return this.connection;
+    }
+
+    return new Connection(endpoint, {
+      commitment: 'confirmed',
+      wsEndpoint: this.config.wssUrl,
+    });
+  }
+
+  private shouldUseSanctumGateway(): boolean {
+    const explicitGateway = process.env.USE_SANCTUM_GATEWAY;
+    if (explicitGateway === 'true') return true;
+    if (explicitGateway === 'false') return false;
+
+    const explicitDirect = process.env.USE_DIRECT_RPC;
+    if (explicitDirect === 'true') return false;
+    if (explicitDirect === 'false') return true;
+
+    const normalizedRpc = this.config.rpcUrl.toLowerCase();
+    const isMainnet =
+      normalizedRpc.includes('mainnet') &&
+      !normalizedRpc.includes('devnet') &&
+      !normalizedRpc.includes('testnet');
+
+    return isMainnet;
+  }
+
+  private getDirectRpcUrls(): string[] {
+    const configured = this.config.sanctumDirectRpcUrls ?? [];
+    return configured.filter(url => url.trim().length > 0);
   }
 
   private sleep(ms: number): Promise<void> {
@@ -677,17 +828,51 @@ class ShadowSwapKeeper {
  */
 async function main() {
   // Load configuration from environment
+  const defaultRpcUrl =
+    process.env.RPC_URL ||
+    'https://solana-devnet.g.alchemy.com/v2/adhb_t3nkZM8basT45GGA';
+
+  const parseCsv = (value?: string): string[] =>
+    value
+      ? value
+          .split(',')
+          .map(entry => entry.trim())
+          .filter(Boolean)
+      : [];
+
+  const normalizedRpcUrl = defaultRpcUrl.toLowerCase();
+  const isLikelyMainnet =
+    normalizedRpcUrl.includes('mainnet') &&
+    !normalizedRpcUrl.includes('devnet') &&
+    !normalizedRpcUrl.includes('testnet');
+
+  // Development defaults stick to public devnet RPCs; mainnet flips over to Sanctum's private gateway.
+  const devnetDirectRpcDefaults = [
+    'https://solana-devnet.g.alchemy.com/v2/adhb_t3nkZM8basT45GGA',
+    'https://devnet.helius-rpc.com/?api-key=f5dc6516-fe72-497f-9c75-1aa3a8d6928b',
+  ];
+
+  const directRpcUrlsFromEnv = parseCsv(process.env.SANCTUM_DIRECT_RPC_URLS);
+  const sanctumDirectRpcUrls =
+    directRpcUrlsFromEnv.length > 0
+      ? directRpcUrlsFromEnv
+      : isLikelyMainnet
+        ? []
+        : devnetDirectRpcDefaults;
+
   const config: KeeperConfig = {
-    rpcUrl: process.env.RPC_URL || 'https://api.devnet.solana.com',
+    rpcUrl: defaultRpcUrl,
     wssUrl: process.env.WSS_URL,
-    programId: process.env.PROGRAM_ID || '5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt',
-    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || 'FWSgsP1rt8jQT3MXNQyyXfgpks1mDQCFZz25ZktuuJg8',
+    programId: process.env.PROGRAM_ID || 'CwE5KHSTsStjt2pBYjK7G7vH5T1dk3tBvePb1eg26uhA',
+    orderBookPubkey: process.env.ORDER_BOOK_PUBKEY || '63kRwuBA7VZHrP4KU97g1B218fKMShuvKk7qLZjGqBqJ',
+    idlPath: process.env.SHADOW_SWAP_IDL_PATH || process.env.IDL_PATH,
     keeperKeypairPath: process.env.KEEPER_KEYPAIR_PATH || '~/.config/solana/id.json',
     arciumMpcUrl: process.env.ARCIUM_MPC_URL || 'https://mpc.arcium.com',
     arciumClientId: process.env.ARCIUM_CLIENT_ID || '',
     arciumClientSecret: process.env.ARCIUM_CLIENT_SECRET || '',
     sanctumGatewayUrl: process.env.SANCTUM_GATEWAY_URL || 'https://gateway.sanctum.so',
     sanctumApiKey: process.env.SANCTUM_API_KEY || '',
+    sanctumDirectRpcUrls: sanctumDirectRpcUrls.length > 0 ? sanctumDirectRpcUrls : undefined,
     matchInterval: parseInt(process.env.MATCH_INTERVAL || '10000'),
     maxRetries: parseInt(process.env.MAX_RETRIES || '3'),
     retryDelayMs: parseInt(process.env.RETRY_DELAY_MS || '1000'),
