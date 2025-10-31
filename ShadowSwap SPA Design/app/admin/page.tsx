@@ -1,8 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Connection, LAMPORTS_PER_SOL, PublicKey, clusterApiUrl } from "@solana/web3.js"
-import { getAssociatedTokenAddress } from "@solana/spl-token"
+import { LAMPORTS_PER_SOL, PublicKey, clusterApiUrl } from "@solana/web3.js"
 import { useWallet } from "@/contexts/WalletContext"
 import { isAdminAddress } from "@/lib/admin"
 import { ShadowSwapClient } from "@/lib/shadowSwapClient"
@@ -10,11 +9,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { LoaderInline } from "@/components/ui/loader"
 import { Input } from "@/components/ui/input"
+import { KpiCards } from "@/components/admin/KpiCards"
+import { VolumeCharts } from "@/components/admin/VolumeCharts"
+import { ORDER_STATUS } from "@/lib/program"
+import { getDailyVolumesFromLogs } from "@/lib/admin/metrics"
+import { getSharedConnection, getMultipleAccountsInfoRL, getSlotRL, getRecentPerformanceSamplesRL } from "@/lib/rpc"
 
 type UserRow = {
   owner: string
   balanceSol: number
-  balanceUsdc: number
   orderCount: number
 }
 
@@ -26,6 +29,13 @@ export default function AdminPage() {
   const [rows, setRows] = useState<UserRow[]>([])
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState("")
+
+  // KPI state (real data)
+  const [kpis, setKpis] = useState<{ label: string; value: string; sub?: string }[]>([])
+  const [baseSeries, setBaseSeries] = useState<{ day: string; value: number }[]>([])
+  const [quoteSeries, setQuoteSeries] = useState<{ day: string; value: number }[]>([])
+  const [tvl, setTvl] = useState<{ baseSol: number; quoteUsdc: number } | null>(null)
+  const [cluster, setCluster] = useState<{ slot: number; tps: number; programId: string; orderBooks: number } | null>(null)
 
   const isAdmin = useMemo(() => isAdminAddress(walletAddress), [walletAddress])
 
@@ -56,61 +66,60 @@ export default function AdminPage() {
         }
 
         const uniqueOwners = Array.from(counts.keys())
-        const connection = new Connection(RPC_URL, "confirmed")
+        const connection = getSharedConnection()
 
-        // Fetch SOL balances in parallel
-        const solBalances = await Promise.all(
-          uniqueOwners.map(async (k) => {
-            try {
-              const lamports = await connection.getBalance(new PublicKey(k))
-              return lamports / LAMPORTS_PER_SOL
-            } catch {
-              return 0
-            }
-          })
-        )
-
-        // Fetch USDC balances in parallel
-        const USDC_MINT = process.env.NEXT_PUBLIC_QUOTE_MINT
-          ? new PublicKey(process.env.NEXT_PUBLIC_QUOTE_MINT)
-          : undefined
-
-        const usdcBalances = await Promise.all(
-          uniqueOwners.map(async (k) => {
-            if (!USDC_MINT) return 0
-            try {
-              const ownerPk = new PublicKey(k)
-              // Prefer direct ATA, fallback to parsed accounts sum
-              const ata = await getAssociatedTokenAddress(USDC_MINT, ownerPk)
-              const ataInfo = await connection.getParsedAccountInfo(ata)
-              if (ataInfo.value && "data" in ataInfo.value && (ataInfo.value.data as any).parsed) {
-                const parsed = (ataInfo.value.data as any).parsed
-                const ui = parsed?.info?.tokenAmount?.uiAmount || 0
-                return ui as number
-              }
-
-              const parsedResp = await connection.getParsedTokenAccountsByOwner(ownerPk, { mint: USDC_MINT })
-              const total = parsedResp.value.reduce((sum, acc) => {
-                const ui = (acc.account.data as any).parsed?.info?.tokenAmount?.uiAmount || 0
-                return sum + (ui as number)
-              }, 0)
-              return total
-            } catch {
-              return 0
-            }
-          })
-        )
+        // Batch fetch SOL balances via rate-limited helper to avoid RPC 429
+        const ownerPks = uniqueOwners.map((k) => new PublicKey(k))
+        const infos = await getMultipleAccountsInfoRL(ownerPks, connection)
+        const solBalances = infos.map((info) => (info ? info.lamports / LAMPORTS_PER_SOL : 0))
 
         const data: UserRow[] = uniqueOwners.map((k, i) => ({
           owner: k,
           balanceSol: solBalances[i],
-          balanceUsdc: usdcBalances[i],
           orderCount: counts.get(k) || 0,
         }))
 
         // Sort by order count desc
         data.sort((a, b) => b.orderCount - a.orderCount)
         setRows(data)
+
+        // Build KPIs from real data
+        const totalOrders = orders.length
+        const activeOrders = orders.filter(o => o.status === ORDER_STATUS.ACTIVE || o.status === ORDER_STATUS.PARTIAL).length
+        const uniqueUsers = uniqueOwners.length
+        const orderBooksCount = await client.fetchOrderBooksCount()
+        setKpis([
+          { label: 'Total Orders', value: totalOrders.toLocaleString() },
+          { label: 'Active Orders', value: activeOrders.toLocaleString() },
+          { label: 'Unique Users', value: uniqueUsers.toLocaleString() },
+          { label: 'Order Books', value: orderBooksCount.toString() },
+        ])
+
+        // Trading volumes from real settlement logs
+        const volumes = await getDailyVolumesFromLogs(
+          client.getConnection(),
+          new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!),
+          30,
+          30,
+        )
+        setBaseSeries(volumes.map(v => ({ day: v.day, value: v.base })))
+        setQuoteSeries(volumes.map(v => ({ day: v.day, value: v.quote })))
+
+        // Liquidity (TVL) from escrow token accounts
+        const tvlRes = await client.fetchEscrowTvl()
+        setTvl({ baseSol: tvlRes.baseSol, quoteUsdc: tvlRes.quoteUsdc })
+
+        // Cluster/program stats
+        const conn = client.getConnection()
+        const slot = await getSlotRL(conn)
+        let tps = 0
+        try {
+          const samples = await getRecentPerformanceSamplesRL(conn)
+          if (samples.length > 0 && samples[0].numSlots > 0) {
+            tps = samples[0].numTransactions / samples[0].samplePeriodSecs
+          }
+        } catch {}
+        setCluster({ slot, tps: Math.round(tps), programId: process.env.NEXT_PUBLIC_PROGRAM_ID || 'N/A', orderBooks: orderBooksCount })
       } catch (e: any) {
         setError(e?.message || "Failed to load admin data")
       } finally {
@@ -152,24 +161,79 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="max-w-7xl mx-auto px-4 py-10">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
-        <p className="text-white/60 text-sm mt-1">Users</p>
+    <main className="max-w-7xl mx-auto px-4 py-10 space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white text-glow-purple">Admin Dashboard</h1>
+          <p className="text-white/60 text-sm mt-1">Realtime on-chain orders and user metrics</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Input placeholder="Search wallet, tx, order, pair" className="w-72 glass text-white placeholder:text-white/40" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <select className="glass rounded-md px-2 py-2 text-sm text-white/80">
+            <option>24h</option>
+            <option>7d</option>
+            <option>30d</option>
+            <option>YTD</option>
+          </select>
+        </div>
       </div>
 
-      <Card className="mb-6">
+      <KpiCards kpis={kpis} />
+
+      {(baseSeries.length > 0 || quoteSeries.length > 0) && (
+        <VolumeCharts base={baseSeries} quote={quoteSeries} />
+      )}
+
+      {tvl && (
+        <Card className="bg-white/5 border-white/10">
+          <CardHeader><CardTitle className="text-white">Platform Liquidity (TVL)</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <div className="text-xs text-white/60">SOL (Base)</div>
+                <div className="text-xl font-semibold text-white">{tvl.baseSol.toFixed(4)} SOL</div>
+              </div>
+              <div>
+                <div className="text-xs text-white/60">USDC (Quote)</div>
+                <div className="text-xl font-semibold text-white">{tvl.quoteUsdc.toFixed(2)} USDC</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {cluster && (
+        <Card className="bg-white/5 border-white/10">
+          <CardHeader><CardTitle className="text-white">Program / Cluster</CardTitle></CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div>
+                <div className="text-xs text-white/60">Program ID</div>
+                <div className="font-mono text-sm text-white/90 break-all">{cluster.programId}</div>
+              </div>
+              <div>
+                <div className="text-xs text-white/60">Order Books</div>
+                <div className="text-xl font-semibold text-white">{cluster.orderBooks}</div>
+              </div>
+              <div>
+                <div className="text-xs text-white/60">Slot</div>
+                <div className="text-xl font-semibold text-white">{cluster.slot}</div>
+              </div>
+              <div>
+                <div className="text-xs text-white/60">TPS</div>
+                <div className="text-xl font-semibold text-white">{cluster.tps}</div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card className="bg-white/5 border-white/10">
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle>Users</CardTitle>
             <div className="flex items-center gap-4">
               <div className="hidden sm:block text-white/70 text-sm">Total Users: {rows.length}</div>
-              <Input
-                placeholder="Search by public key"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-56 bg-white/5 border-white/10 text-white placeholder:text-white/40"
-              />
             </div>
           </div>
         </CardHeader>
@@ -185,7 +249,6 @@ export default function AdminPage() {
                   <TableRow>
                     <TableHead>User</TableHead>
                     <TableHead>SOL Balance</TableHead>
-                    <TableHead>USDC Balance</TableHead>
                     <TableHead>Order Count</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -199,7 +262,6 @@ export default function AdminPage() {
                       <TableRow key={r.owner}>
                         <TableCell className="font-mono text-xs text-white/90">{r.owner}</TableCell>
                         <TableCell>{r.balanceSol.toFixed(4)}</TableCell>
-                        <TableCell>{r.balanceUsdc.toFixed(2)}</TableCell>
                         <TableCell>{r.orderCount}</TableCell>
                       </TableRow>
                     ))

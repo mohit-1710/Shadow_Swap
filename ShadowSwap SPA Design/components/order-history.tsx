@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Pill } from "@/components/ui/pill"
 import { Button } from "@/components/ui/button"
@@ -8,15 +8,17 @@ import { useWallet } from "@/contexts/WalletContext"
 import { useOrderBook } from "@/hooks/useOrderBook"
 import { useShadowSwap } from "@/hooks/useShadowSwap"
 import { PublicKey } from "@solana/web3.js"
-import { RefreshCw, Loader2 } from "lucide-react"
+import { getSignaturesForAddressRL } from "@/lib/rpc"
+import { RefreshCw, Loader2, ExternalLink } from "lucide-react"
 import { toast } from "sonner"
 import { ORDER_STATUS } from "@/lib/program"
 
 export function OrderHistory() {
   const { isWalletConnected } = useWallet()
   const { orders, isLoading, error, refresh } = useOrderBook(5000) // Refresh every 5s
-  const { cancelOrder } = useShadowSwap()
+  const { cancelOrder, shadowSwapClient } = useShadowSwap()
   const [cancellingOrderId, setCancellingOrderId] = useState<string | null>(null)
+  const [txByOrder, setTxByOrder] = useState<Record<string, string | null>>({})
 
   const formatDate = (timestamp: number) => {
     const date = new Date(timestamp * 1000) // Convert Unix timestamp to milliseconds
@@ -62,6 +64,49 @@ export function OrderHistory() {
         return "warning"
     }
   }
+
+  // Determine explorer cluster param from RPC
+  const explorerCluster = useMemo(() => {
+    const rpc = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com"
+    if (/mainnet|api.mainnet/i.test(rpc)) return undefined // default mainnet, omit param
+    if (/testnet/i.test(rpc)) return "testnet"
+    return "devnet"
+  }, [])
+
+  const getExplorerUrl = (sig: string) => {
+    const base = `https://explorer.solana.com/tx/${sig}`
+    return explorerCluster ? `${base}?cluster=${explorerCluster}` : base
+  }
+
+  // Fetch latest tx signature that touched each FILLED order account
+  useEffect(() => {
+    if (!shadowSwapClient) return
+    const filled = orders.filter(o => o.status === ORDER_STATUS.FILLED || o.status === ORDER_STATUS.EXECUTED)
+    if (filled.length === 0) return
+
+    let aborted = false
+    const conn = shadowSwapClient.getConnection?.() || null
+    if (!conn) return
+
+    ;(async () => {
+      const updates: Record<string, string | null> = {}
+      for (const o of filled) {
+        if (txByOrder[o.publicKey] !== undefined) continue
+        try {
+          const sigs = await getSignaturesForAddressRL(new PublicKey(o.publicKey), { limit: 1 }, conn)
+          updates[o.publicKey] = sigs.length > 0 ? sigs[0].signature : null
+        } catch (e) {
+          console.error('Failed to fetch signatures for order', o.publicKey, e)
+          updates[o.publicKey] = null
+        }
+      }
+      if (!aborted && Object.keys(updates).length > 0) {
+        setTxByOrder(prev => ({ ...prev, ...updates }))
+      }
+    })()
+
+    return () => { aborted = true }
+  }, [orders, shadowSwapClient])
 
   const handleCancelOrder = async (orderAddress: string) => {
     // Prevent double-clicks
@@ -201,6 +246,21 @@ export function OrderHistory() {
                         </Button>
                       ) : order.status === ORDER_STATUS.MATCHED_PENDING ? (
                         <span className="text-yellow-400 text-xs" title="Order is being matched">Processing...</span>
+                      ) : order.status === ORDER_STATUS.FILLED || order.status === ORDER_STATUS.EXECUTED ? (
+                        txByOrder[order.publicKey] ? (
+                          <a
+                            href={getExplorerUrl(txByOrder[order.publicKey] as string)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="pill-button text-xs"
+                            title="View settlement transaction on Solana Explorer"
+                          >
+                            <ExternalLink className="pill-icon w-3.5 h-3.5 text-white/80" />
+                            <span>View Tx</span>
+                          </a>
+                        ) : (
+                          <span className="text-white/30 text-xs">Locating tx…</span>
+                        )
                       ) : (
                         <span className="text-white/30 text-xs">-</span>
                       )}

@@ -4,9 +4,9 @@ import { useState, useEffect, useCallback } from "react"
 import { useWallet } from "@/contexts/WalletContext"
 import { ShadowSwapClient, OrderParams, OrderResult, BalanceData } from "@/lib/shadowSwapClient"
 import { AnchorProvider } from "@coral-xyz/anchor"
-import { Connection, PublicKey } from "@solana/web3.js"
+import { PublicKey } from "@solana/web3.js"
+import { getSharedConnection } from "@/lib/rpc"
 
-const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "https://api.devnet.solana.com"
 const PROGRAM_ID = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!)
 const ORDER_BOOK = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK!)
 const BASE_MINT = new PublicKey(process.env.NEXT_PUBLIC_BASE_MINT || "So11111111111111111111111111111111111111112")
@@ -22,7 +22,7 @@ export function useShadowSwap() {
     if (wallet?.publicKey && wallet?.signTransaction) {
       try {
         console.log('🔌 Initializing ShadowSwapClient...')
-        const connection = new Connection(RPC_URL, "confirmed")
+        const connection = getSharedConnection()
         
         const walletAdapter = {
           publicKey: wallet.publicKey,

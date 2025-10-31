@@ -10,7 +10,8 @@ import { useWallet } from "@/contexts/WalletContext"
 import { useShadowSwap } from "@/hooks/useShadowSwap"
 import { useCurrentPrice } from "@/hooks/useCurrentPrice"
 import { toast } from "sonner"
-import { Connection, PublicKey } from "@solana/web3.js"
+import { PublicKey } from "@solana/web3.js"
+import { getSharedConnection } from "@/lib/rpc"
 import { 
   getPublicLiquidityQuote, 
   getPublicLiquiditySwapTx, 
@@ -382,7 +383,7 @@ export function TradeSection() {
       console.log('✍️ Requesting swap transaction (fallback) ...')
       const base64Tx = await getPublicLiquiditySwapTx(quote, wallet.publicKey as PublicKey)
 
-      const connection = new Connection(RPC_URL, 'confirmed')
+      const connection = getSharedConnection()
       const txid = await executePublicLiquiditySwap(base64Tx, wallet, connection)
 
       toast.success(
