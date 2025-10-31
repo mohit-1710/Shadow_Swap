@@ -1,0 +1,1135 @@
+{
+  "address": "ESHkd14KmUUJthjVqKoh7JP1oVVMFJCqPPkpsrJrT5Kt",
+  "metadata": {
+    "name": "shadow_swap",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "ShadowSwap - Privacy-preserving DEX on Solana"
+  },
+  "instructions": [
+    {
+      "name": "cancel_order",
+      "docs": [
+        "Cancel an existing order"
+      ],
+      "discriminator": [
+        95,
+        129,
+        237,
+        240,
+        8,
+        49,
+        223,
+        132
+      ],
+      "accounts": [
+        {
+          "name": "order",
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "writable": true
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "order_book",
+          "writable": true
+        },
+        {
+          "name": "owner",
+          "signer": true,
+          "relations": [
+            "order"
+          ]
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "create_callback_auth",
+      "docs": [
+        "Create callback authorization for keeper",
+        "",
+        "This allows the order book authority to authorize a keeper bot",
+        "to submit match results and execute settlements."
+      ],
+      "discriminator": [
+        185,
+        85,
+        143,
+        206,
+        0,
+        113,
+        204,
+        65
+      ],
+      "accounts": [
+        {
+          "name": "order_book"
+        },
+        {
+          "name": "callback_auth",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  108,
+                  108,
+                  98,
+                  97,
+                  99,
+                  107,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order_book"
+              },
+              {
+                "kind": "account",
+                "path": "keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "keeper"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "expires_at",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "initialize_order_book",
+      "docs": [
+        "Initialize a new order book for a trading pair"
+      ],
+      "discriminator": [
+        93,
+        233,
+        9,
+        128,
+        33,
+        199,
+        152,
+        88
+      ],
+      "accounts": [
+        {
+          "name": "order_book",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114,
+                  95,
+                  98,
+                  111,
+                  111,
+                  107
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "base_mint"
+              },
+              {
+                "kind": "account",
+                "path": "quote_mint"
+              }
+            ]
+          }
+        },
+        {
+          "name": "authority",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "fee_collector"
+        },
+        {
+          "name": "base_mint"
+        },
+        {
+          "name": "quote_mint"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "base_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "quote_mint",
+          "type": "pubkey"
+        },
+        {
+          "name": "fee_bps",
+          "type": "u16"
+        },
+        {
+          "name": "min_base_order_size",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "submit_encrypted_order",
+      "docs": [
+        "Submit an encrypted order (stores encrypted payload on-chain)",
+        "",
+        "This is the standard Anchor instruction that accepts encrypted order data",
+        "from the client and stores it on-chain. The matching happens off-chain",
+        "in the Hybrid architecture."
+      ],
+      "discriminator": [
+        61,
+        244,
+        189,
+        182,
+        36,
+        51,
+        117,
+        241
+      ],
+      "accounts": [
+        {
+          "name": "order_book",
+          "writable": true
+        },
+        {
+          "name": "order",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  111,
+                  114,
+                  100,
+                  101,
+                  114
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order_book"
+              },
+              {
+                "kind": "account",
+                "path": "order_book.order_count",
+                "account": "OrderBook"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119,
+                  95,
+                  116,
+                  111,
+                  107,
+                  101,
+                  110
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "user_token_account",
+          "writable": true
+        },
+        {
+          "name": "token_mint"
+        },
+        {
+          "name": "owner",
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        },
+        {
+          "name": "rent",
+          "address": "SysvarRent111111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "cipher_payload",
+          "type": "bytes"
+        },
+        {
+          "name": "encrypted_amount",
+          "type": "bytes"
+        },
+        {
+          "name": "posted_amount",
+          "type": "u64"
+        }
+      ]
+    },
+    {
+      "name": "submit_match_results",
+      "docs": [
+        "Submit match results and execute settlement",
+        "",
+        "This instruction is called by the authorized keeper bot after matching orders",
+        "off-chain. It performs the actual token transfers to settle the trade.",
+        "",
+        "Flow:",
+        "1. Verify keeper authorization via callback_auth",
+        "2. Calculate transfer amounts based on matched_amount and execution_price",
+        "3. Transfer quote tokens (USDC) from buyer's escrow to seller",
+        "4. Transfer base tokens (WSOL) from seller's escrow to buyer",
+        "5. Update order statuses to \"Executed\"",
+        "6. Emit settlement event"
+      ],
+      "discriminator": [
+        181,
+        76,
+        40,
+        54,
+        62,
+        60,
+        126,
+        39
+      ],
+      "accounts": [
+        {
+          "name": "callback_auth",
+          "docs": [
+            "Callback authorization - verifies keeper is authorized"
+          ],
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  99,
+                  97,
+                  108,
+                  108,
+                  98,
+                  97,
+                  99,
+                  107,
+                  95,
+                  97,
+                  117,
+                  116,
+                  104
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "order_book"
+              },
+              {
+                "kind": "account",
+                "path": "keeper"
+              }
+            ]
+          }
+        },
+        {
+          "name": "order_book",
+          "docs": [
+            "Order book"
+          ],
+          "writable": true
+        },
+        {
+          "name": "buyer_order",
+          "docs": [
+            "Buyer's order account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "seller_order",
+          "docs": [
+            "Seller's order account"
+          ],
+          "writable": true
+        },
+        {
+          "name": "buyer_escrow",
+          "docs": [
+            "Buyer's escrow account (holds quote tokens - USDC)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "buyer_order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "seller_escrow",
+          "docs": [
+            "Seller's escrow account (holds base tokens - WSOL)"
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "seller_order"
+              }
+            ]
+          }
+        },
+        {
+          "name": "keeper",
+          "docs": [
+            "Keeper account (authorized via callback_auth)"
+          ],
+          "signer": true
+        },
+        {
+          "name": "token_program",
+          "docs": [
+            "Token program for CPI calls"
+          ],
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "match_input",
+          "type": {
+            "defined": {
+              "name": "MatchResultInput"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "CallbackAuth",
+      "discriminator": [
+        95,
+        49,
+        45,
+        146,
+        53,
+        145,
+        238,
+        240
+      ]
+    },
+    {
+      "name": "EncryptedOrder",
+      "discriminator": [
+        82,
+        52,
+        93,
+        72,
+        209,
+        212,
+        50,
+        250
+      ]
+    },
+    {
+      "name": "Escrow",
+      "discriminator": [
+        31,
+        213,
+        123,
+        187,
+        186,
+        22,
+        218,
+        155
+      ]
+    },
+    {
+      "name": "OrderBook",
+      "discriminator": [
+        55,
+        230,
+        125,
+        218,
+        149,
+        39,
+        65,
+        248
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "TradeSettled",
+      "discriminator": [
+        22,
+        119,
+        166,
+        225,
+        175,
+        53,
+        93,
+        216
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "OrderBookNotActive",
+      "msg": "Order book is not active"
+    },
+    {
+      "code": 6001,
+      "name": "InvalidOrderStatus",
+      "msg": "Invalid order status"
+    },
+    {
+      "code": 6002,
+      "name": "OrderTooSmall",
+      "msg": "Order amount too small"
+    },
+    {
+      "code": 6003,
+      "name": "InvalidCipherPayload",
+      "msg": "Invalid cipher payload"
+    },
+    {
+      "code": 6004,
+      "name": "UnauthorizedCallback",
+      "msg": "Unauthorized callback"
+    },
+    {
+      "code": 6005,
+      "name": "CallbackAuthExpired",
+      "msg": "Callback auth expired"
+    },
+    {
+      "code": 6006,
+      "name": "InvalidEscrow",
+      "msg": "Invalid escrow account"
+    },
+    {
+      "code": 6007,
+      "name": "InsufficientEscrowFunds",
+      "msg": "Insufficient funds in escrow"
+    },
+    {
+      "code": 6008,
+      "name": "InvalidTokenMint",
+      "msg": "Invalid token mint"
+    },
+    {
+      "code": 6009,
+      "name": "OrderNotFound",
+      "msg": "Order not found"
+    },
+    {
+      "code": 6010,
+      "name": "OrderAlreadyFilled",
+      "msg": "Order already filled"
+    },
+    {
+      "code": 6011,
+      "name": "OrderAlreadyCancelled",
+      "msg": "Order already cancelled"
+    },
+    {
+      "code": 6012,
+      "name": "InvalidOrderBook",
+      "msg": "Invalid order book"
+    },
+    {
+      "code": 6013,
+      "name": "InvalidFeeConfiguration",
+      "msg": "Invalid fee configuration"
+    },
+    {
+      "code": 6014,
+      "name": "NumericalOverflow",
+      "msg": "Numerical overflow"
+    },
+    {
+      "code": 6015,
+      "name": "OrderNotActive",
+      "msg": "Order is not active"
+    }
+  ],
+  "types": [
+    {
+      "name": "CallbackAuth",
+      "docs": [
+        "CallbackAuth - Authentication token for callback operations",
+        "",
+        "This account is used to authorize callback operations from the keeper/matching",
+        "engine. It ensures only authorized entities can trigger order matching."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that can use this callback auth"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "order_book",
+            "docs": [
+              "Order book this callback auth is valid for"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "nonce",
+            "docs": [
+              "Nonce to prevent replay attacks"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "expires_at",
+            "docs": [
+              "Expiration timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "is_active",
+            "docs": [
+              "Whether this callback auth is active"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EncryptedOrder",
+      "docs": [
+        "EncryptedOrder - Stores individual encrypted order data",
+        "",
+        "This account stores fully encrypted order information. The on-chain program",
+        "never sees plaintext order details (price, amount, side). All order data",
+        "is encrypted client-side and stored as a cipher payload."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "owner",
+            "docs": [
+              "Order owner's public key"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "order_book",
+            "docs": [
+              "Order book this order belongs to"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "cipher_payload",
+            "docs": [
+              "Encrypted order payload containing:",
+              "- Order side (buy/sell) - encrypted",
+              "- Price - encrypted",
+              "- Amount - encrypted",
+              "- Other order parameters - encrypted",
+              "Maximum size: 512 bytes for encrypted data"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Order status (1 = active, 2 = partially filled, 3 = filled, 4 = cancelled)",
+              "This can be public as it doesn't reveal order details"
+            ],
+            "type": "u8"
+          },
+          {
+            "name": "encrypted_remaining",
+            "docs": [
+              "Encrypted remaining amount (updates as order fills)"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "escrow",
+            "docs": [
+              "Escrow account holding the order's funds"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Order creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "updated_at",
+            "docs": [
+              "Last update timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "order_id",
+            "docs": [
+              "Order ID (sequential, assigned by order book)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "Escrow",
+      "docs": [
+        "Escrow - Holds funds for an order until it's matched or cancelled",
+        "",
+        "Each order has an associated escrow account that holds either:",
+        "- Base tokens (for sell orders)",
+        "- Quote tokens (for buy orders)"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order",
+            "docs": [
+              "Order this escrow belongs to"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "owner",
+            "docs": [
+              "Order owner"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "order_book",
+            "docs": [
+              "Order book"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "token_account",
+            "docs": [
+              "Token account holding escrowed funds",
+              "This is a PDA-owned token account"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "token_mint",
+            "docs": [
+              "Mint of the escrowed token"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "encrypted_amount",
+            "docs": [
+              "Original encrypted amount deposited"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "encrypted_remaining",
+            "docs": [
+              "Encrypted remaining amount (decreases as order fills)"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Escrow creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "MatchResultInput",
+      "docs": [
+        "Match result input for settlement (plaintext from keeper)",
+        "",
+        "This struct contains the decrypted match details that the keeper bot",
+        "submits to execute the trade settlement. The keeper has computed the",
+        "matching off-chain and decrypted the results."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyer_pubkey",
+            "docs": [
+              "Buyer's order account pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "seller_pubkey",
+            "docs": [
+              "Seller's order account pubkey"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "matched_amount",
+            "docs": [
+              "Matched amount in base token units (e.g., lamports for WSOL)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "execution_price",
+            "docs": [
+              "Execution price: quote tokens per base token",
+              "(adjusted for decimals, e.g., USDC micro-units per WSOL lamport)"
+            ],
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "OrderBook",
+      "docs": [
+        "OrderBook - Manages the order book for a trading pair",
+        "",
+        "For MVP, this handles SOL/USDC pair. The structure is designed to be",
+        "extensible for multi-token support in future phases."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "authority",
+            "docs": [
+              "Authority that can manage the order book"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "base_mint",
+            "docs": [
+              "Base token mint (SOL for MVP)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "quote_mint",
+            "docs": [
+              "Quote token mint (USDC for MVP)"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "order_count",
+            "docs": [
+              "Total number of orders created (used for sequential order IDs)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "active_orders",
+            "docs": [
+              "Number of active orders"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "encrypted_volume_base",
+            "docs": [
+              "Total trading volume (base token) - encrypted"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "encrypted_volume_quote",
+            "docs": [
+              "Total trading volume (quote token) - encrypted"
+            ],
+            "type": "bytes"
+          },
+          {
+            "name": "created_at",
+            "docs": [
+              "Order book creation timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "last_trade_at",
+            "docs": [
+              "Last trade timestamp"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "fee_bps",
+            "docs": [
+              "Fee basis points (e.g., 30 = 0.3%)"
+            ],
+            "type": "u16"
+          },
+          {
+            "name": "fee_collector",
+            "docs": [
+              "Fee collector account"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "min_base_order_size",
+            "docs": [
+              "Minimum order size (base token, in lamports/smallest unit)"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "is_active",
+            "docs": [
+              "Whether the order book is active"
+            ],
+            "type": "bool"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "Bump seed for PDA derivation"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradeSettled",
+      "docs": [
+        "Event emitted when a trade is settled"
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "order_book",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "seller_order_id",
+            "type": "u64"
+          },
+          {
+            "name": "base_amount",
+            "type": "u64"
+          },
+          {
+            "name": "quote_amount",
+            "type": "u64"
+          },
+          {
+            "name": "execution_price",
+            "type": "u64"
+          },
+          {
+            "name": "timestamp",
+            "type": "i64"
+          }
+        ]
+      }
+    }
+  ]
+}

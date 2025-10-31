@@ -48,6 +48,9 @@ Thumbs.db
 !tsconfig*.json
 !**/package.json
 !**/tsconfig.json
+# IDL files needed for frontend build
+!**/idl/*.json
+!**/lib/idl/*.json
 
 # Rust
 **/*.rs.bk
