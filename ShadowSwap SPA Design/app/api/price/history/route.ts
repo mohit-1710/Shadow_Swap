@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 
+export const dynamic = 'force-dynamic' // Required because we use req.url for searchParams
 export const revalidate = 120 // cache for 2 minutes on the server
 
 export async function GET(req: Request) {
