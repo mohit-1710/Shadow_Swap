@@ -718,30 +718,40 @@ export function TradeSection() {
 
                 {/* Action Button & Days Dropdown (Side by Side) */}
                 <div className="flex gap-3">
-                  {/* Place Order Button */}
-                  <Button 
-                    variant="default" 
-                    size="lg" 
-                    className={orderType === "limit" ? "flex-1" : "w-full"}
-                    onClick={handleTrade}
-                    disabled={isSubmitting || !isWalletConnected}
-                  >
-                    {isSubmitting 
-                      ? (
-                        <span className="flex items-center gap-2">
-                          <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                          Submitting...
-                        </span>
-                      )
-                      : !isWalletConnected 
-                      ? "Connect Wallet to Trade" 
-                      : orderType === "limit" 
-                      ? (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Place Limit Order")
-                      : (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Execute Market Order")}
-                  </Button>
+                  {/* Place Order Button with Purple Glitter Effect */}
+                  <div className={orderType === "limit" ? "flex-1 relative overflow-hidden" : "w-full relative overflow-hidden"}>
+                    {/* Place Order Button */}
+                    <Button 
+                      variant="default" 
+                      size="lg" 
+                      className={orderType === "limit" ? "w-full" : "w-full"}
+                      onClick={handleTrade}
+                      disabled={isSubmitting || !isWalletConnected}
+                    >
+                      {isSubmitting 
+                        ? (
+                          <span className="flex items-center gap-2">
+                            <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            Submitting...
+                          </span>
+                        )
+                        : !isWalletConnected 
+                        ? "Connect Wallet to Trade" 
+                        : orderType === "limit" 
+                        ? (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Place Limit Order")
+                        : (isFallbackCountdown ? `Matching... (${fallbackCountdown}s)` : "Execute Market Order")}
+                    </Button>
+                    {/* Purple Glitter Effect - Animated lines */}
+                    {!isSubmitting && isWalletConnected && (
+                      <>
+                        <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+                        <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+                      </>
+                    )}
+                  </div>
 
                   {/* Expiration/Delay Dropdown - Only for Limit Orders */}
                   {orderType === "limit" && (

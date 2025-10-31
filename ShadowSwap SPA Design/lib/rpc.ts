@@ -42,8 +42,11 @@ async function withBackoff<T>(fn: () => Promise<T>, label: string, maxRetries = 
       lastErr = e
       const rate = isRateLimitError(e)
       const delay = delays[Math.min(attempt, delays.length - 1)]
-      // eslint-disable-next-line no-console
-      console.error(`RPC error on ${label}${rate ? ' (429)' : ''}. Retrying after ${delay}ms...`)
+      // Only log to console in development, never show to user
+      if (process.env.NODE_ENV === 'development') {
+        // eslint-disable-next-line no-console
+        console.warn(`[RPC] ${label}${rate ? ' rate-limited' : ' error'}, retry ${attempt + 1}/${maxRetries}`)
+      }
       if (rate && attempt >= 1) rotateEndpoint()
       await sleep(delay)
     }

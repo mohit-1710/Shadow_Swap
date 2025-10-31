@@ -146,24 +146,29 @@ export function Header() {
           </nav>
           {/* X link (hidden on admin route) */}
           {!isDocs && !isAdminRoute && (
-            <a
-              href="https://x.com/ShadowSwapDXE"
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label="ShadowSwap on X"
-              title="ShadowSwap on X"
-              className="x-pill"
-            >
-              {/* The X icon inherits currentColor and animates via global theme */}
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              {/* Fallback to PNG if SVG fails to load */}
-              <span className="x-logo text-white/80">
-                {/* Inline SVG to adopt theme color */}
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                  <path d="M18.244 2H21l-6.52 7.45L22 22h-6.9l-4.31-5.62L5.73 22H3l7.01-8.01L2 2h6.9l3.92 5.2L18.244 2Zm-1.21 18h2.03L7.04 4h-2.1l12.094 16Z" />
-                </svg>
-              </span>
-            </a>
+            <div className="relative overflow-hidden">
+              <a
+                href="https://x.com/ShadowSwapDXE"
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="ShadowSwap on X"
+                title="ShadowSwap on X"
+                className="x-pill relative"
+              >
+                {/* The X icon inherits currentColor and animates via global theme */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                {/* Fallback to PNG if SVG fails to load */}
+                <span className="x-logo text-white/80">
+                  {/* Inline SVG to adopt theme color */}
+                  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                    <path d="M18.244 2H21l-6.52 7.45L22 22h-6.9l-4.31-5.62L5.73 22H3l7.01-8.01L2 2h6.9l3.92 5.2L18.244 2Zm-1.21 18h2.03L7.04 4h-2.1l12.094 16Z" />
+                  </svg>
+                </span>
+              </a>
+              {/* Purple Glitter Effect - Animated lines */}
+              <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+              <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+            </div>
           )}
           
           {/* Connect Wallet Button (hidden on docs) */}
@@ -278,23 +283,28 @@ export function Header() {
                 )}
                 {/* Mobile X link (hidden on admin route) */}
                 {!isDocs && !isAdminRoute && (
-                  <a
-                    href="https://x.com/ShadowSwapDXE"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    aria-label="ShadowSwap on X"
-                    title="ShadowSwap on X"
-                    className="x-pill w-full justify-center py-2"
-                  >
-                    <span className="inline-flex items-center gap-2">
-                      <span className="x-logo text-white/80">
-                        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
-                          <path d="M18.244 2H21l-6.52 7.45L22 22h-6.9l-4.31-5.62L5.73 22H3l7.01-8.01L2 2h6.9l3.92 5.2L18.244 2Zm-1.21 18h2.03L7.04 4h-2.1l12.094 16Z" />
-                        </svg>
+                  <div className="relative overflow-hidden">
+                    <a
+                      href="https://x.com/ShadowSwapDXE"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label="ShadowSwap on X"
+                      title="ShadowSwap on X"
+                      className="x-pill w-full justify-center py-2 relative"
+                    >
+                      <span className="inline-flex items-center gap-2">
+                        <span className="x-logo text-white/80">
+                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true">
+                            <path d="M18.244 2H21l-6.52 7.45L22 22h-6.9l-4.31-5.62L5.73 22H3l7.01-8.01L2 2h6.9l3.92 5.2L18.244 2Zm-1.21 18h2.03L7.04 4h-2.1l12.094 16Z" />
+                          </svg>
+                        </span>
+                        <span>Follow us on X</span>
                       </span>
-                      <span>Follow us on X</span>
-                    </span>
-                  </a>
+                    </a>
+                    {/* Purple Glitter Effect - Animated lines */}
+                    <div className="absolute top-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-top glow-purple" />
+                    <div className="absolute bottom-0 h-[2px] w-[35%] bg-gradient-to-r from-transparent via-purple-400 to-transparent animate-line-bottom glow-purple" />
+                  </div>
                 )}
                 {!isDocs && (
                 <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
