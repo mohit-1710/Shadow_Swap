@@ -29,6 +29,13 @@ export default function AdminPage() {
 
   const isAdmin = useMemo(() => isAdminAddress(walletAddress), [walletAddress])
 
+  // Compute filtered rows early so hooks order remains stable across renders
+  const filteredRows = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    if (!q) return rows
+    return rows.filter(r => r.owner.toLowerCase().includes(q))
+  }, [rows, search])
+
   useEffect(() => {
     if (!isWalletConnected || !isAdmin) return
 
@@ -143,12 +150,6 @@ export default function AdminPage() {
       </main>
     )
   }
-
-  const filteredRows = useMemo(() => {
-    const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter(r => r.owner.toLowerCase().includes(q))
-  }, [rows, search])
 
   return (
     <main className="max-w-7xl mx-auto px-4 py-10">

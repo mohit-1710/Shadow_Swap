@@ -1,12 +1,13 @@
 "use client"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
 import { useRouter, usePathname } from "next/navigation"
 import Link from "next/link"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { useWallet } from "@/contexts/WalletContext"
 import { Menu, X, Copy, RefreshCw, LogOut, ChevronDown } from "lucide-react"
+import { isAdminAddress } from "@/lib/admin"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
@@ -16,6 +17,7 @@ export function Header() {
   const pathname = usePathname()
   const isDocs = pathname?.startsWith("/docs")
   const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
+  const isAdmin = useMemo(() => isAdminAddress(walletAddress), [walletAddress])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -129,6 +131,15 @@ export function Header() {
                 </Link>
               )
             ))}
+            {/* Admin link for allowlisted wallets */}
+            {!isDocs && isAdmin && (
+              <Link
+                href="/admin"
+                className="text-white/80 hover:text-purple-300 transition-colors duration-200 text-sm font-medium"
+              >
+                Admin
+              </Link>
+            )}
           </nav>
           
           {/* Connect Wallet Button (hidden on docs) */}
@@ -207,35 +218,45 @@ export function Header() {
       </div>
 
       {/* Mobile Navigation */}
-      {isOpen && (
-        <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md">
-          <nav className="flex flex-col gap-4 p-4">
-            {navItems.map((item) => (
-              item.href.startsWith('#') ? (
-                <a
-                  key={item.label}
-                  href={item.href}
-                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
-                  onClick={() => setIsOpen(false)}
-                >
-                  {item.label}
-                </a>
-              ) : (
-                <Link
-                  key={item.label}
-                  href={item.href}
-                  className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
-                  onClick={() => setIsOpen(false)}
-                >
-                  {item.label}
-                </Link>
-              )
-            ))}
-            {!isDocs && (
-            <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
-              <div className="relative overflow-hidden">
-                <Button 
-                  variant="default" 
+          {isOpen && (
+            <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md">
+              <nav className="flex flex-col gap-4 p-4">
+                {navItems.map((item) => (
+                  item.href.startsWith('#') ? (
+                    <a
+                      key={item.label}
+                      href={item.href}
+                      className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      {item.label}
+                    </a>
+                  ) : (
+                    <Link
+                      key={item.label}
+                      href={item.href}
+                      className="text-white/70 hover:text-purple-400 transition-colors duration-200 py-2"
+                      onClick={() => setIsOpen(false)}
+                    >
+                      {item.label}
+                    </Link>
+                  )
+                ))}
+                {/* Mobile Admin link for allowlisted wallets */}
+                {!isDocs && isAdmin && (
+                  <Link
+                    href="/admin"
+                    className="text-white/80 hover:text-purple-300 transition-colors duration-200 py-2"
+                    onClick={() => setIsOpen(false)}
+                  >
+                    Admin
+                  </Link>
+                )}
+                {!isDocs && (
+                <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
+                  <div className="relative overflow-hidden">
+                    <Button 
+                      variant="default" 
                   size="sm" 
                   className="w-full cursor-pointer hover:scale-105 transition-transform flex items-center justify-center gap-2" 
                   onClick={handleWalletClick}

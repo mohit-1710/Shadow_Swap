@@ -83,6 +83,27 @@ export class ShadowSwapClient {
     this.quoteMint = quoteMint;
   }
 
+  // Convenience factory for pages that have a wallet adapter and want defaults from env
+  static fromWallet(wallet: any): ShadowSwapClient {
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
+    const connection = new Connection(rpcUrl, 'confirmed');
+
+    const walletAdapter = {
+      publicKey: wallet?.publicKey,
+      signTransaction: wallet?.signTransaction,
+      signAllTransactions: wallet?.signAllTransactions,
+    } as any;
+
+    const provider = new AnchorProvider(connection, walletAdapter, { preflightCommitment: 'confirmed' });
+
+    const programId = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!);
+    const orderBook = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK!);
+    const baseMint = new PublicKey(process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112');
+    const quoteMint = new PublicKey(process.env.NEXT_PUBLIC_QUOTE_MINT || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+
+    return new ShadowSwapClient(provider, programId, orderBook, baseMint, quoteMint);
+  }
+
   /**
    * Get user's WSOL balance (in SOL units)
    */
@@ -391,6 +412,32 @@ export class ShadowSwapClient {
       }));
     } catch (error) {
       console.error('Error fetching user orders:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Fetch all orders (admin use)
+   */
+  async fetchAllOrders(): Promise<OrderData[]> {
+    try {
+      await this.initialize();
+      if (!this.program) {
+        return [];
+      }
+
+      // Fetch all encryptedOrder accounts
+      const orders = await (this.program.account as any).encryptedOrder.all();
+
+      return orders.map((order: any) => ({
+        publicKey: order.publicKey.toString(),
+        owner: order.account.owner.toString(),
+        orderId: order.account.orderId.toString(),
+        status: order.account.status,
+        createdAt: order.account.createdAt.toNumber(),
+      }));
+    } catch (error) {
+      console.error('Error fetching all orders:', error);
       return [];
     }
   }
