@@ -3,6 +3,7 @@
  */
 
 import { Connection, PublicKey, Transaction, SystemProgram, SYSVAR_RENT_PUBKEY, SendTransactionError } from '@solana/web3.js';
+import { getSharedConnection, getLatestBlockhashRL, getAccountInfoRL, getMultipleAccountsInfoRL } from './rpc'
 import { AnchorProvider, BN, Program, Idl } from '@coral-xyz/anchor';
 import { 
   TOKEN_PROGRAM_ID, 
@@ -83,10 +84,73 @@ export class ShadowSwapClient {
     this.quoteMint = quoteMint;
   }
 
+  /** Expose connection for lightweight cluster stats */
+  getConnection(): Connection {
+    return this.connection
+  }
+
+  /** Fetch count of OrderBook accounts */
+  async fetchOrderBooksCount(): Promise<number> {
+    try {
+      await this.initialize();
+      if (!this.program) return 0;
+      const obs = await (this.program.account as any).orderBook.all();
+      return obs.length;
+    } catch (e) {
+      console.error('Error fetching order books:', e);
+      return 0;
+    }
+  }
+
+  /** Fetch count of Escrow accounts */
+  async fetchEscrowsCount(): Promise<number> {
+    try {
+      await this.initialize();
+      if (!this.program) return 0;
+      const esc = await (this.program.account as any).escrow.all();
+      return esc.length;
+    } catch (e) {
+      console.error('Error fetching escrows:', e);
+      return 0;
+    }
+  }
+
+  /** Compute TVL across all escrow token accounts (base + quote). */
+  async fetchEscrowTvl(): Promise<{ baseSol: number; quoteUsdc: number; totalUsdApprox?: number }> {
+    try {
+      await this.initialize();
+      if (!this.program) return { baseSol: 0, quoteUsdc: 0 };
+      const escrows = await (this.program.account as any).escrow.all();
+      const tokenAccounts: PublicKey[] = escrows.map((e: any) => e.account.tokenAccount);
+      const infos = await getMultipleAccountsInfoRL(tokenAccounts, this.connection);
+      let baseLamports = 0n;
+      let quoteMicros = 0n;
+      for (let i = 0; i < escrows.length; i++) {
+        const e = escrows[i];
+        const info = infos[i];
+        if (!info) continue;
+        try {
+          const data = AccountLayout.decode(info.data);
+          const amount = BigInt(data.amount.toString());
+          const mint = e.account.tokenMint as PublicKey;
+          if (mint.equals(this.baseMint)) baseLamports += amount;
+          else if (mint.equals(this.quoteMint)) quoteMicros += amount;
+        } catch (_) {
+          // skip
+        }
+      }
+      const baseSol = Number(baseLamports) / 1e9;
+      const quoteUsdc = Number(quoteMicros) / 1e6;
+      return { baseSol, quoteUsdc };
+    } catch (e) {
+      console.error('Error computing TVL:', e);
+      return { baseSol: 0, quoteUsdc: 0 };
+    }
+  }
+
   // Convenience factory for pages that have a wallet adapter and want defaults from env
   static fromWallet(wallet: any): ShadowSwapClient {
-    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'https://api.devnet.solana.com';
-    const connection = new Connection(rpcUrl, 'confirmed');
+    const connection = getSharedConnection();
 
     const walletAdapter = {
       publicKey: wallet?.publicKey,
@@ -148,7 +212,7 @@ export class ShadowSwapClient {
       // Build close instruction
       const tx = new Transaction();
       tx.add(createCloseAccountInstruction(wsolAta, owner, owner));
-      tx.recentBlockhash = (await this.connection.getLatestBlockhash()).blockhash;
+      tx.recentBlockhash = (await getLatestBlockhashRL(this.connection)).blockhash;
       tx.feePayer = owner;
 
       const signed = await this.provider.wallet.signTransaction(tx);
@@ -319,7 +383,7 @@ export class ShadowSwapClient {
       console.log('📦 Total instructions in transaction:', transaction.instructions.length);
 
       // Manually handle blockhash, signing, and confirmation to prevent stale transactions
-      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      const { blockhash, lastValidBlockHeight } = await getLatestBlockhashRL(this.connection);
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = this.provider.publicKey;
 
@@ -529,7 +593,7 @@ export class ShadowSwapClient {
       const [escrowTokenPda] = deriveEscrowTokenAccountPda(orderAddress, this.programId);
 
       // Fetch the escrow token account to check what mint it holds
-      const escrowTokenAccountInfo = await this.connection.getAccountInfo(escrowTokenPda);
+      const escrowTokenAccountInfo = await getAccountInfoRL(escrowTokenPda, this.connection);
       if (!escrowTokenAccountInfo) {
         return { success: false, error: 'Escrow token account not found' };
       }
@@ -590,7 +654,7 @@ export class ShadowSwapClient {
       }
 
       // Manually handle blockhash, signing, and confirmation
-      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash();
+      const { blockhash, lastValidBlockHeight } = await getLatestBlockhashRL(this.connection);
       transaction.recentBlockhash = blockhash;
       transaction.feePayer = this.provider.publicKey;
 

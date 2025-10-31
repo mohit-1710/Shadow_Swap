@@ -172,6 +172,30 @@
 }
 
 @layer components {
+  .x-pill {
+    @apply inline-flex items-center justify-center w-8 h-8 rounded-md border border-white/10 bg-white/5 text-white/80 transition-all duration-200;
+  }
+  .x-pill:hover {
+    @apply bg-white/10 text-white shadow-lg;
+    box-shadow: 0 0 12px rgba(168,85,247,0.25);
+  }
+  .x-pill:active { transform: scale(0.96); }
+
+  .x-logo { transition: transform .2s ease, filter .2s ease; }
+  .x-pill:hover .x-logo { transform: rotate(-8deg) scale(1.05); filter: drop-shadow(0 0 8px rgba(168,85,247,0.35)); }
+
+  /* Reusable pill action button (animated) */
+  .pill-button {
+    @apply inline-flex items-center gap-2 px-3 py-1.5 rounded-md border border-white/10 bg-white/5 text-white/80 transition-all duration-200;
+  }
+  .pill-button:hover {
+    @apply bg-white/10 text-white shadow-lg;
+    box-shadow: 0 0 12px rgba(168,85,247,0.25);
+  }
+  .pill-button:active { transform: scale(0.97); }
+  .pill-icon { transition: transform .2s ease, filter .2s ease; }
+  .pill-button:hover .pill-icon { transform: translateY(-1px); filter: drop-shadow(0 0 6px rgba(168,85,247,0.35)); }
+
   .glass {
     @apply bg-black/40 backdrop-blur-md border border-white/10;
   }
@@ -247,6 +271,28 @@
     height: 2px;
     background: linear-gradient(90deg, transparent 0%, #a855f7 100%);
     box-shadow: 0 0 8px rgba(168, 85, 247, 0.4);
+  }
+
+  /* Cyan lines variant (for charts/program sections without purple) */
+  .accent-line-cyan::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, #22d3ee 0%, transparent 100%);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
+  }
+  .accent-line-cyan::after {
+    content: "";
+    position: absolute;
+    bottom: 0;
+    right: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent 0%, #22d3ee 100%);
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.35);
   }
 
   /* Green lines for success variant (Filled status) */
@@ -356,5 +402,3 @@
 .animate-subtle-bounce {
   animation: subtle-bounce 2s ease-in-out infinite;
 }
-
-
