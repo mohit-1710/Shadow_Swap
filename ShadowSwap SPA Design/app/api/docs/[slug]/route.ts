@@ -9,20 +9,19 @@ export async function GET(
   try {
     const { slug } = await params;
     
-    // Get the correct path to the docs folder
-    // process.cwd() returns the Next.js app root (ShadowSwap SPA Design)
-    // We need to go up one level to reach the docs folder
-    const docsPath = path.join(process.cwd(), '..', 'docs');
-    const filePath = path.join(docsPath, `${slug}.md`);
-
-    console.log('Looking for docs at:', filePath);
-    console.log('File exists:', fs.existsSync(filePath));
+    // Look for docs in the local docs folder (if it exists)
+    // If not found, return a helpful error
+    const localDocsPath = path.join(process.cwd(), 'docs', `${slug}.md`);
+    const filePath = fs.existsSync(localDocsPath) ? localDocsPath : null;
 
     // Check if file exists
-    if (!fs.existsSync(filePath)) {
-      console.error(`Documentation file not found at: ${filePath}`);
+    if (!filePath || !fs.existsSync(filePath)) {
+      console.error(`Documentation file not found: ${slug}.md`);
       return NextResponse.json(
-        { error: `Documentation file not found: ${slug}.md`, path: filePath },
+        { 
+          error: `Documentation file not found: ${slug}.md`,
+          hint: 'Create a docs/ folder in the project root and add markdown files there'
+        },
         { status: 404 }
       );
     }

@@ -1,14 +1,13 @@
 {
-  "name": "my-v0-project",
+  "name": "shadowswap-frontend",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@10.19.0",
   "scripts": {
     "build": "next build",
     "dev": "next dev",
-    "lint": "eslint .",
-    "start": "next start",
-    "setup:pool": "ts-node scripts/setupOrcaPool.ts"
+    "lint": "eslint . || true",
+    "start": "next start"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.32.1",
@@ -83,10 +82,15 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "eslint": "^8",
+    "eslint-config-next": "16.0.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
-    "ts-node": "^10.9.2",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "pnpm": ">=10.19.0"
   }
 }

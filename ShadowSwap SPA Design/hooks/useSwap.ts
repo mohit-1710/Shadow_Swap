@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
-import { swapSOLforUSDC, swapUSDCforSOL } from "../lib/onchain/orcaPool";
 import { toast } from "sonner";
 
 type SwapDirection = "SOL_TO_USDC" | "USDC_TO_SOL";
@@ -11,6 +10,10 @@ interface UseSwapProps {
   slippage: number; // in basis points, e.g., 50 for 0.5%
 }
 
+/**
+ * Hook for executing swaps via Jupiter aggregator
+ * Note: This is a placeholder - actual swap implementation should use Jupiter API
+ */
 export function useSwap() {
   const [isSwapping, setIsSwapping] = useState(false);
   const [swapResult, setSwapResult] = useState<{
@@ -42,21 +45,10 @@ export function useSwap() {
     const toastId = toast.loading("Executing swap...");
 
     try {
-      let result;
-      if (direction === "SOL_TO_USDC") {
-        result = await swapSOLforUSDC(wallet as any, amountIn, slippage);
-      } else {
-        result = await swapUSDCforSOL(wallet as any, amountIn, slippage);
-      }
-
-      toast.success("Swap successful!", {
-        id: toastId,
-        action: {
-          label: "View on Solscan",
-          onClick: () => window.open(result.solscanUrl, "_blank"),
-        },
-      });
-      setSwapResult(result);
+      // TODO: Implement Jupiter swap integration
+      // Use /api/jupiter/quote and /api/jupiter/swap endpoints
+      toast.error("Swap functionality not yet implemented", { id: toastId });
+      setError("Swap functionality not yet implemented");
     } catch (e) {
       const error = e as Error;
       toast.error(`Swap failed: ${error.message}`, { id: toastId });

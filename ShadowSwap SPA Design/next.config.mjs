@@ -12,7 +12,7 @@ const nextConfig = {
     unoptimized: true,
   },
   turbopack: {
-    // Ensure the SPA uses its own root, not the monorepo yarn root
+    // Explicitly set root to this directory to avoid monorepo detection
     root: __dirname,
   },
 }
