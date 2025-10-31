@@ -16,6 +16,7 @@ export function Header() {
   const router = useRouter()
   const pathname = usePathname()
   const isDocs = pathname?.startsWith("/docs")
+  const isAdminRoute = pathname?.startsWith("/admin")
   const { isWalletConnected, walletAddress, connectWallet, disconnectWallet } = useWallet()
   const isAdmin = useMemo(() => isAdminAddress(walletAddress), [walletAddress])
 
@@ -41,6 +42,8 @@ export function Header() {
   const navItems: { label: string; href: string }[] = []
 
   const isOnTradePage = pathname === "/trade"
+
+  // Use X icon from public/icons/x-icon.png
 
   // Truncate wallet address for display
   const getTruncatedAddress = () => {
@@ -141,6 +144,19 @@ export function Header() {
               </Link>
             )}
           </nav>
+          {/* X link (hidden on admin route) */}
+          {!isDocs && !isAdminRoute && (
+            <a
+              href="https://x.com/ShadowSwapDXE"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="ShadowSwap on X"
+              title="ShadowSwap on X"
+              className="text-white/70 hover:text-purple-400 transition-colors"
+            >
+              <img src="/icons/x-icon.png" alt="X" className="w-5 h-5 object-contain" />
+            </a>
+          )}
           
           {/* Connect Wallet Button (hidden on docs) */}
           {!isDocs && (
@@ -218,9 +234,9 @@ export function Header() {
       </div>
 
       {/* Mobile Navigation */}
-          {isOpen && (
-            <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md">
-              <nav className="flex flex-col gap-4 p-4">
+      {isOpen && (
+        <div className="md:hidden border-t border-white/10 bg-black/80 backdrop-blur-md">
+          <nav className="flex flex-col gap-4 p-4">
                 {navItems.map((item) => (
                   item.href.startsWith('#') ? (
                     <a
@@ -251,6 +267,22 @@ export function Header() {
                   >
                     Admin
                   </Link>
+                )}
+                {/* Mobile X link (hidden on admin route) */}
+                {!isDocs && !isAdminRoute && (
+                  <a
+                    href="https://x.com/ShadowSwapDXE"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label="ShadowSwap on X"
+                    title="ShadowSwap on X"
+                    className="text-white/70 hover:text-purple-400 transition-colors py-2"
+                  >
+                    <span className="inline-flex items-center gap-2">
+                      <img src="/icons/x-icon.png" alt="X" className="w-5 h-5 object-contain" />
+                      Follow us on X
+                    </span>
+                  </a>
                 )}
                 {!isDocs && (
                 <div className="flex flex-col gap-2 pt-4 border-t border-white/10">
