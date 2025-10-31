@@ -160,8 +160,19 @@ export class ShadowSwapClient {
 
     const provider = new AnchorProvider(connection, walletAdapter, { preflightCommitment: 'confirmed' });
 
-    const programId = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!);
-    const orderBook = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK!);
+    // Validate environment variables with helpful error messages
+    const programIdStr = process.env.NEXT_PUBLIC_PROGRAM_ID;
+    if (!programIdStr) {
+      throw new Error('NEXT_PUBLIC_PROGRAM_ID environment variable is not set. Please set it in your deployment platform and rebuild.');
+    }
+
+    const orderBookStr = process.env.NEXT_PUBLIC_ORDER_BOOK;
+    if (!orderBookStr) {
+      throw new Error('NEXT_PUBLIC_ORDER_BOOK environment variable is not set. Please set it in your deployment platform and rebuild.');
+    }
+
+    const programId = new PublicKey(programIdStr);
+    const orderBook = new PublicKey(orderBookStr);
     const baseMint = new PublicKey(process.env.NEXT_PUBLIC_BASE_MINT || 'So11111111111111111111111111111111111111112');
     const quoteMint = new PublicKey(process.env.NEXT_PUBLIC_QUOTE_MINT || '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
 

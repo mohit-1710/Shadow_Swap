@@ -7,8 +7,23 @@ import { AnchorProvider } from "@coral-xyz/anchor"
 import { PublicKey } from "@solana/web3.js"
 import { getSharedConnection } from "@/lib/rpc"
 
-const PROGRAM_ID = new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!)
-const ORDER_BOOK = new PublicKey(process.env.NEXT_PUBLIC_ORDER_BOOK!)
+// Lazy initialization to prevent crash if env vars are missing
+function getProgramId(): PublicKey {
+  const id = process.env.NEXT_PUBLIC_PROGRAM_ID
+  if (!id) {
+    throw new Error('NEXT_PUBLIC_PROGRAM_ID environment variable is not set')
+  }
+  return new PublicKey(id)
+}
+
+function getOrderBook(): PublicKey {
+  const id = process.env.NEXT_PUBLIC_ORDER_BOOK
+  if (!id) {
+    throw new Error('NEXT_PUBLIC_ORDER_BOOK environment variable is not set')
+  }
+  return new PublicKey(id)
+}
+
 const BASE_MINT = new PublicKey(process.env.NEXT_PUBLIC_BASE_MINT || "So11111111111111111111111111111111111111112")
 const QUOTE_MINT = new PublicKey(process.env.NEXT_PUBLIC_QUOTE_MINT || "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU")
 
@@ -34,7 +49,10 @@ export function useShadowSwap() {
           preflightCommitment: "confirmed",
         })
         
-        const client = new ShadowSwapClient(provider, PROGRAM_ID, ORDER_BOOK, BASE_MINT, QUOTE_MINT)
+        // Initialize PublicKeys with error handling
+        const programId = getProgramId()
+        const orderBook = getOrderBook()
+        const client = new ShadowSwapClient(provider, programId, orderBook, BASE_MINT, QUOTE_MINT)
         setShadowSwapClient(client)
         setError(null)
         console.log('✅ ShadowSwapClient initialized successfully')
