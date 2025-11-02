@@ -1,35 +1,63 @@
 import { NextRequest, NextResponse } from 'next/server';
-import fs from 'fs';
+import { promises as fs } from 'fs';
 import path from 'path';
+
+export const runtime = 'nodejs';
+
+type ParamsPayload = { slug?: string | string[] }
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: Promise<{ slug: string }> }
+  ctx: { params?: ParamsPayload | Promise<ParamsPayload> }
 ) {
   try {
-    const { slug } = await params;
-    
-    // Look for docs in the local docs folder (if it exists)
-    // If not found, return a helpful error
-    const localDocsPath = path.join(process.cwd(), 'docs', `${slug}.md`);
-    const filePath = fs.existsSync(localDocsPath) ? localDocsPath : null;
+    const resolvedParams =
+      ctx.params instanceof Promise ? await ctx.params : ctx.params;
+    const slugFromParams = resolvedParams?.slug;
+    const slugCandidate = Array.isArray(slugFromParams) ? slugFromParams[0] : slugFromParams;
+    const slug =
+      slugCandidate?.trim() ||
+      request.nextUrl.pathname.split('/').filter(Boolean).pop()?.trim();
 
-    // Check if file exists
-    if (!filePath || !fs.existsSync(filePath)) {
-      console.error(`Documentation file not found: ${slug}.md`);
+    if (!slug) {
       return NextResponse.json(
-        { 
-          error: `Documentation file not found: ${slug}.md`,
-          hint: 'Create a docs/ folder in the project root and add markdown files there'
+        { error: 'Missing documentation slug in request.' },
+        { status: 400 }
+      );
+    }
+
+    const docDirectories = [
+      path.join(process.cwd(), 'docs'),
+      path.join(process.cwd(), '..', 'docs'),
+    ];
+
+    let filePath: string | null = null;
+    for (const dir of docDirectories) {
+      const candidate = path.join(dir, `${slug}.md`);
+      try {
+        await fs.access(candidate);
+        filePath = candidate;
+        break;
+      } catch {
+        continue;
+      }
+    }
+
+    if (!filePath) {
+      const searchPaths = docDirectories.map((dir) => path.join(dir, `${slug}.md`));
+      const errorMessage = `Documentation file not found: ${slug}.md`;
+      console.error(`${errorMessage} (searched: ${searchPaths.join(', ')})`);
+      return NextResponse.json(
+        {
+          error: errorMessage,
+          hint: 'Add a markdown file for this section under one of the docs/ directories.',
+          searched: searchPaths,
         },
         { status: 404 }
       );
     }
 
-    // Read the markdown file
-    const content = fs.readFileSync(filePath, 'utf-8');
-
-    // Remove frontmatter (YAML between --- markers)
+    const content = await fs.readFile(filePath, 'utf-8');
     const contentWithoutFrontmatter = content.replace(/^---[\s\S]*?---\n/, '');
 
     console.log(`Successfully loaded ${slug}.md (${content.length} bytes)`);
@@ -46,4 +74,3 @@ export async function GET(
     );
   }
 }
-

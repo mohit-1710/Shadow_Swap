@@ -428,14 +428,18 @@ export default function DocsPage() {
           {/* Search Bar */}
           <div className="mb-12">
             <div className="relative max-w-2xl">
-              <Search
-                aria-hidden="true"
-                className="absolute left-4 inset-y-0 my-auto w-5 h-5 text-white/80 pointer-events-none"
-                strokeWidth={2}
-                shapeRendering="geometricPrecision"
-                vectorEffect="non-scaling-stroke"
-              />
+              <label htmlFor="docs-search" className="sr-only">Search documentation</label>
+              <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-white/70">
+                <Search
+                  aria-hidden="true"
+                  className="h-5 w-5"
+                  strokeWidth={2}
+                  shapeRendering="geometricPrecision"
+                  vectorEffect="non-scaling-stroke"
+                />
+              </span>
               <Input
+                id="docs-search"
                 type="text"
                 placeholder="Search documentation..."
                 value={searchQuery}
