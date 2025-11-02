@@ -1,82 +1,78 @@
 # Settlement Bot (Keeper)
 
-TypeScript daemon that keeps ShadowSwap trustworthy by decrypting orders, matching them off-chain, and submitting `submit_match_results` on-chain.
+The settlement bot is a long-running TypeScript service that keeps ShadowSwap honest. It listens for encrypted orders stored by the Anchor program, decrypts them via an MPC client, matches compatible buys and sells, and submits `submit_match_results` transactions back to Solana.
 
 ## Responsibilities
 
-1. **Fetch** PDAs for all ACTIVE/PARTIAL `EncryptedOrder` accounts.
-2. **Decrypt** each payload (mock Arcium today) and validate owner/side/amount.
-3. **Match** buys vs sells using price-time priority, skipping zero-remain/self matches.
+1. **Discover** active `EncryptedOrder` accounts for the configured order book PDA.
+2. **Decrypt & validate** payloads (owner, side, price, remaining size) using the configured Arcium client.
+3. **Match** orders with a price–time priority engine that skips self-matches and dust amounts.
 4. **Settle** matches by:
-   - Ensuring buyer/seller ATAs exist.
-   - Verifying escrow balances.
-   - Guarding against u64 overflow.
-   - Submitting the Anchor instruction via direct RPC (or Sanctum).
+   - Ensuring associated token accounts exist for both parties.
+   - Verifying escrow balances against the order metadata.
+   - Building Anchor instructions and submitting them through Sanctum or direct RPC.
+   - Retrying idempotently when transactions land in a different block.
 
-```mermaid
-graph TD
-  A[Encrypted Orders] -->|fetch| B(Decrypt & Validate)
-  B --> C(Match Engine)
-  C -->|build tx| D[Settlement Tx]
-  D -->|submit| E[Solana]
-  E -->|status| C
+```text
+Encrypted orders → decrypt → match → build transaction → submit → confirm
 ```
+
+## Project Structure
+
+| File/Folder | Purpose |
+| --- | --- |
+| `src/index.ts` | Main loop: discovery, batching, settlement, metrics. |
+| `src/matcher.ts` | Price–time priority implementation and settlement math. |
+| `src/arcium-client.ts` | Interfaces for real and mock MPC decryption backends. |
+| `src/sanctum-client.ts` | Transaction submitters (Sanctum relay vs direct RPC). |
+| `src/types.ts` | Local TypeScript helpers layered on top of `@shadowswap/shared-types`. |
 
 ## Setup
 
 ```bash
 cd apps/settlement_bot
-yarn install
-cp .env.example .env
-# edit .env with real RPC, wallet, Arcium/Sanctum keys
-yarn dev
+cp .env.example .env            # populate RPC URLs, PDA addresses, keeper keypair
+yarn install                    # if you are running it standalone
+yarn dev                        # ts-node with file watching
 ```
 
-### Important Environment Variables
+> The root workspace script `yarn dev:bot` runs the same command from the monorepo.
 
-| Key | Description |
+### Environment Variables
+
+| Variable | Description |
 | --- | --- |
-| `RPC_URL` / `WSS_URL` | Solana RPC + WebSocket endpoints |
-| `PROGRAM_ID` | Anchor program ID (default `5Lg1Bz...`) |
-| `ORDER_BOOK_PUBKEY` | Active order book PDA |
-| `KEEPER_KEYPAIR_PATH` | Keeper signer (must hold SOL + authority) |
-| `USE_MOCK_ARCIUM` | `true` = deterministic mock decrypts |
-| `USE_DIRECT_RPC` | `true` = send txs directly instead of Sanctum |
-| `USE_MOCK_SANCTUM` | keep `false` to actually settle |
+| `PROGRAM_ID` | ShadowSwap Anchor program (defaults to `5Lg1BzRkhUPkcEVaBK8wbfpPcYf7PZdSVqRnoBv597wt`). |
+| `ORDER_BOOK_PUBKEY` | PDA for the order book this keeper should service. |
+| `RPC_URL` / `WSS_URL` | HTTPS + WebSocket endpoints for Solana (devnet by default). |
+| `KEEPER_KEYPAIR_PATH` | Path to the JSON keypair that signs settlement transactions. |
+| `ARCIUM_MPC_URL` / `ARCIUM_CLIENT_ID` / `ARCIUM_CLIENT_SECRET` | Connection info for the MPC provider (defaults to demo credentials). |
+| `SANCTUM_GATEWAY_URL` / `SANCTUM_API_KEY` | Optional relay configuration for private submission. |
+| `USE_DIRECT_RPC` | `true` to bypass Sanctum and submit directly to `RPC_URL`. |
+| `USE_MOCK_ARCIUM` | `true` swaps in deterministic mock decrypts for development. |
+| `USE_MOCK_SANCTUM` | Leave `false` unless writing integration tests. |
+| `MATCH_INTERVAL` | Milliseconds between matching cycles (default `10000`). |
+| `MAX_RETRIES` / `RETRY_DELAY_MS` | Configure retry strategy for failed submissions. |
+| `LOG_LEVEL` | `info`, `debug`, or `error`. |
 
 ## Commands
 
-```bash
-# Development run (ts-node)
-yarn dev
-
-# Compile to dist/
-yarn build
-
-# (Optional) lint/tests
-yarn lint && yarn test
-```
-
-## File Tour
-
-| File | Purpose |
+| Command | Description |
 | --- | --- |
-| `src/index.ts` | Main loop, decryption, validation, settlement builder |
-| `src/matcher.ts` | Price-time priority matcher + stats |
-| `src/arcium-client.ts` | Real + mock MPC clients |
-| `src/sanctum-client.ts` | Sanctum + direct RPC submitters |
-| `src/types.ts` | Shared TS interfaces |
+| `yarn dev` | Runs the keeper via `ts-node` with watch mode. |
+| `yarn build` | Emits JavaScript into `dist/` for production deployments. |
+| `yarn start` | Executes the compiled build (`node dist/index.js`). |
+| `yarn test` | Jest suite for the matcher and helpers. |
+| `yarn lint` | ESLint over `src/**/*.ts`. |
 
-## Logs to Watch
+## Operational Tips
 
-- `⚠️ Buyer base ATA missing` – bot will create it once and retry.
-- `Buyer escrow underfunded` – cancel the stale order; funds were never locked.
-- `NumericalOverflow` – indicates legacy orders with unrealistic amounts or price decimals; resubmit with fresh balances.
+- Ensure `yarn anchor:setup` has been executed so the order book PDA, callback auth PDAs, and keeper authority exist.
+- Monitor logs for warnings such as `Buyer escrow underfunded` or `NumericalOverflow`; both typically point to stale or malformed orders that should be cancelled.
+- If you rotate the keeper keypair, rerun the setup script or create the callback authority PDA manually.
 
 ## Extending the Bot
 
-- Add custom matching strategies by editing `matcher.ts`.
-- Plug in a real Arcium SDK by replacing `MockArciumClient` logic.
-- Swap Sanctum for another private mempool by implementing `SanctumClient`-like class.
-
-Always ensure the bot’s `.env` references the latest order book PDA emitted by `yarn anchor:setup`.
+- Swap in a real Arcium SDK by implementing the same interface exported from `arcium-client.ts`.
+- Add monitoring/metrics by emitting Prometheus or Datadog gauges from the main loop.
+- Support alternative matching strategies by extending `matcher.ts` and toggling them via configuration.

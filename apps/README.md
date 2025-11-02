@@ -1,11 +1,17 @@
-# Apps Directory
+# Apps
 
-This workspace bundles every executable part of ShadowSwap:
+Everything that runs in production for ShadowSwap lives under `apps/`. Each subdirectory has its own README with deeper instructions; the table below helps you choose the right entry point.
 
-| Folder | Description | Key Commands |
-| --- | --- | --- |
-| `anchor_program` | Anchor-based Solana program that owns the order book, escrow PDAs, and settlement logic. | `yarn anchor:build`, `yarn anchor:test`, `anchor deploy` |
-| `frontend` | Next.js 14 UI for wallet connection, encryption, WSOL/USDC handling, and order management. | `yarn dev`, `yarn build`, `yarn lint` |
-| `settlement_bot` | TypeScript keeper bot that decrypts orders (via Arcium), matches them, and submits `submit_match_results` transactions. | `yarn dev`, `yarn build` |
+| Folder | Stack | Purpose | Dev command |
+| --- | --- | --- | --- |
+| `anchor_program` | Anchor (Rust) | On-chain logic that stores encrypted orders, escrow PDAs, and settlement instructions. | `yarn anchor:build` / `yarn anchor:test` |
+| `frontend` | Next.js (TypeScript) | Browser client for placing encrypted orders, monitoring balances, and viewing markets. | `yarn dev:frontend` |
+| `settlement_bot` | Node.js (TypeScript) | Keeper daemon that decrypts, matches, and submits fills back to the program. | `yarn dev:bot` |
 
-See each subfolder’s README for a deep dive into its architecture, required environment variables, and troubleshooting tips.
+## Getting Around
+
+- Start with the root README to set up shared dependencies and environment files.
+- Each app README documents its required environment variables, build scripts, and troubleshooting tips.
+- When you change the Anchor program, remember to propagate account layout updates to the frontend and settlement bot via `packages/shared_types`.
+
+Need the automation scripts that glue these apps together? Check `scripts/README.md` in the repository root.

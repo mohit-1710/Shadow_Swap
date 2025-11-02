@@ -116,9 +116,13 @@ export default function AdminPage() {
         ])
 
         // Trading volumes from real settlement logs
+        const programIdStr = process.env.NEXT_PUBLIC_PROGRAM_ID
+        if (!programIdStr) {
+          throw new Error('NEXT_PUBLIC_PROGRAM_ID environment variable is not set')
+        }
         const volumes = await getDailyVolumesFromLogs(
           client.getConnection(),
-          new PublicKey(process.env.NEXT_PUBLIC_PROGRAM_ID!),
+          new PublicKey(programIdStr),
           30,
           30,
         )
