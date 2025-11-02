@@ -5,16 +5,19 @@ import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet a
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets"
 import { clusterApiUrl } from "@solana/web3.js"
+import { WalletReadyState } from "@solana/wallet-adapter-base"
 
 // Import wallet adapter styles
 import "@solana/wallet-adapter-react-ui/styles.css"
 
 const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || clusterApiUrl("devnet")
 
+type WalletConnectResult = "success" | "no-wallet" | "error"
+
 interface WalletContextType {
   isWalletConnected: boolean
   walletAddress: string | null
-  connectWallet: () => Promise<boolean>
+  connectWallet: () => Promise<WalletConnectResult>
   disconnectWallet: () => void
   wallet: ReturnType<typeof useSolanaWallet> | null
 }
@@ -28,27 +31,37 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
   const wallet = useSolanaWallet()
   const { connected, publicKey, disconnect, select, wallets } = wallet
 
-  const connectWallet = async (): Promise<boolean> => {
+  const connectWallet = async (): Promise<WalletConnectResult> => {
     try {
-      // If not connected, try to select and connect
-      if (!connected && wallets.length > 0) {
-        // Try Phantom first
-        const phantomWallet = wallets.find(w => w.adapter.name === 'Phantom')
-        if (phantomWallet) {
-          select(phantomWallet.adapter.name)
-          await phantomWallet.adapter.connect()
-          return true
-        }
-        
-        // Fallback to first available wallet
-        select(wallets[0].adapter.name)
-        await wallets[0].adapter.connect()
-        return true
+      // Identify wallets that are ready for use (extension installed)
+      const readyWallets = wallets.filter(({ adapter }) => {
+        const state = adapter.readyState
+        return state === WalletReadyState.Installed
+      })
+
+      if (!connected && readyWallets.length === 0) {
+        return "no-wallet"
       }
-      return connected
+
+      // If not connected, try to select and connect
+      if (!connected && readyWallets.length > 0) {
+        // Prefer Phantom when available, otherwise fall back to the first ready wallet
+        const phantomWallet = readyWallets.find((w) => w.adapter.name === "Phantom")
+        const targetWallet = phantomWallet ?? readyWallets[0]
+
+        if (!targetWallet) {
+          return "no-wallet"
+        }
+
+        select(targetWallet.adapter.name)
+        await targetWallet.adapter.connect()
+        return "success"
+      }
+
+      return "success"
     } catch (error) {
       console.error("Error connecting wallet:", error)
-      return false
+      return "error"
     }
   }
 

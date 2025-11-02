@@ -9,6 +9,16 @@ import { useWallet } from "@/contexts/WalletContext"
 import { Menu, X, Copy, RefreshCw, LogOut, ChevronDown } from "lucide-react"
 import { isAdminAddress } from "@/lib/admin"
 
+const DevnetEnvironmentBadge = ({ className = "" }: { className?: string }) => (
+  <span className={`inline-flex items-center gap-1 rounded-full border border-emerald-400/60 bg-emerald-500/10 px-2.5 py-0.5 text-[0.625rem] font-medium uppercase tracking-wide text-emerald-300 shadow-[0_3px_10px_rgba(16,185,129,0.25)] ${className}`}>
+    <span className="relative flex h-2 w-2 items-center justify-center">
+      <span className="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping" />
+      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-emerald-300" />
+    </span>
+    Devnet
+  </span>
+)
+
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
   const [showWalletDropdown, setShowWalletDropdown] = useState(false)
@@ -66,9 +76,15 @@ export function Header() {
     disconnectWallet()
     toast.info("Please select a different wallet", { dismissible: true })
     setTimeout(async () => {
-      const success = await connectWallet()
-      if (success) {
+      const result = await connectWallet()
+      if (result === "success") {
         toast.success("Wallet changed successfully", { dismissible: true })
+      } else if (result === "no-wallet") {
+        toast.error("No wallet detected. Install a Solana wallet extension to continue.", {
+          dismissible: true,
+        })
+      } else if (result === "error") {
+        toast.error("Error while connecting wallet", { dismissible: true })
       }
     }, 500)
   }
@@ -91,12 +107,16 @@ export function Header() {
     }
 
     // Attempt to connect wallet
-    const success = await connectWallet()
-    
-    if (success) {
+    const result = await connectWallet()
+
+    if (result === "success") {
       toast.success("Connected successfully", { dismissible: true })
       // Navigate to trade page after successful connection
       router.push("/trade")
+    } else if (result === "no-wallet") {
+      toast.error("No wallet detected. Install a Solana wallet extension to continue.", {
+        dismissible: true,
+      })
     } else {
       toast.error("Error while connecting wallet", { dismissible: true })
     }
@@ -106,10 +126,11 @@ export function Header() {
     <header className="sticky top-0 z-50 bg-black/80 backdrop-blur-md pt-6">
       <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
         {/* Logo */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Link href="/" className="text-xl font-bold text-white hover:text-purple-400 transition-colors cursor-pointer font-[family-name:var(--font-instrument-serif)]">
             ShadowSwap
           </Link>
+          <DevnetEnvironmentBadge className="ml-1" />
         </div>
         {/* Desktop Navigation & Buttons */}
         <div className="hidden md:flex items-center gap-6">

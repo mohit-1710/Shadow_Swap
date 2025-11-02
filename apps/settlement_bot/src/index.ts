@@ -48,10 +48,10 @@ const U64_MAX = 18446744073709551615n;
 class ShadowSwapKeeper {
   private connection: Connection;
   private provider: AnchorProvider;
-  private program: Program<Idl>;
+  private program!: Program<Idl>;
   private keeper: Keypair;
-  private orderBook: PublicKey;
-  private callbackAuth: PublicKey;
+  private orderBook!: PublicKey;
+  private callbackAuth!: PublicKey;
   
   private arciumClient: ArciumClient;
   private sanctumClient: SanctumClient;
@@ -59,6 +59,7 @@ class ShadowSwapKeeper {
   private config: KeeperConfig;
   private isRunning: boolean = false;
   private matchCount: number = 0;
+  private initialized = false;
 
   constructor(config: KeeperConfig) {
     this.config = config;
@@ -78,13 +79,6 @@ class ShadowSwapKeeper {
       commitment: 'confirmed',
     });
     
-    // Load program IDL and create program client
-    this.program = this.loadProgram();
-    
-    // Order book and callback auth PDAs
-    this.orderBook = new PublicKey(config.orderBookPubkey);
-    this.callbackAuth = this.deriveCallbackAuth();
-    
     // Initialize Arcium and Sanctum clients
     this.arciumClient = this.createArciumClient();
     this.sanctumClient = this.createSanctumClient();
@@ -94,6 +88,8 @@ class ShadowSwapKeeper {
    * Start the keeper bot
    */
   async start(): Promise<void> {
+    await this.ensureInitialized();
+
     console.log('\n🚀 ============================================');
     console.log('   ShadowSwap Keeper Bot - Hybrid Architecture');
     console.log('============================================\n');
@@ -134,6 +130,17 @@ class ShadowSwapKeeper {
   stop(): void {
     console.log('\n🛑 Stopping keeper bot...');
     this.isRunning = false;
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) {
+      return;
+    }
+
+    this.program = await this.loadProgram();
+    this.orderBook = new PublicKey(this.config.orderBookPubkey);
+    this.callbackAuth = this.deriveCallbackAuth();
+    this.initialized = true;
   }
 
   /**
@@ -597,21 +604,72 @@ class ShadowSwapKeeper {
     return Keypair.fromSecretKey(Uint8Array.from(secretKey));
   }
 
-  private loadProgram(): Program<Idl> {
-    const idlPath = this.resolveIdlPath();
+  private async loadProgram(): Promise<Program<Idl>> {
+    const { resolved: idlPath, checked } = this.resolveIdlPath();
+    let idl: Idl | null = null;
+    let idlSource: string | undefined;
+    let lastReadError: Error | null = null;
 
-    let idl: Idl;
-    try {
-      idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
-    } catch (error) {
-      const reason =
-        error instanceof Error ? error.message : 'unknown read error';
-      throw new Error(
-        `Failed to read ShadowSwap IDL at ${idlPath}: ${reason}`
-      );
+    if (idlPath) {
+      try {
+        idl = JSON.parse(fs.readFileSync(idlPath, 'utf-8')) as Idl;
+        idlSource = `local file ${idlPath}`;
+      } catch (error) {
+        lastReadError =
+          error instanceof Error ? error : new Error(String(error));
+        console.warn(
+          `⚠️ Failed to read ShadowSwap IDL at ${idlPath}: ${lastReadError.message}.`
+        );
+      }
     }
 
     const configuredProgramId = this.config.programId?.trim();
+
+    if (!idl) {
+      if (!configuredProgramId) {
+        const messageParts = [
+          'ShadowSwap IDL not found.',
+          checked.length > 0
+            ? `Checked local paths: ${checked.join(', ')}.`
+            : undefined,
+          'Set PROGRAM_ID in the environment or provide SHADOW_SWAP_IDL_PATH / IDL_PATH to a local shadow_swap.json.',
+        ];
+
+        if (lastReadError) {
+          messageParts.push(`Last read error: ${lastReadError.message}.`);
+        }
+
+        throw new Error(messageParts.filter(Boolean).join(' '));
+      }
+
+      let fetchedIdl: Idl | null = null;
+      let fetchError: Error | null = null;
+
+      try {
+        fetchedIdl = await anchor.Program.fetchIdl(
+          new PublicKey(configuredProgramId),
+          this.provider
+        );
+      } catch (error) {
+        fetchError = error instanceof Error ? error : new Error(String(error));
+      }
+
+      if (!fetchedIdl) {
+        const messageParts = [
+          `ShadowSwap IDL not found for program ${configuredProgramId}.`,
+          checked.length > 0
+            ? `Checked local paths: ${checked.join(', ')}.`
+            : undefined,
+          'Run "yarn anchor:build" to generate the IDL locally, deploy the program so the IDL is available on-chain, or set SHADOW_SWAP_IDL_PATH to an existing shadow_swap.json.',
+          fetchError ? `Last fetch error: ${fetchError.message}.` : undefined,
+        ];
+        throw new Error(messageParts.filter(Boolean).join(' '));
+      }
+
+      idl = fetchedIdl;
+      idlSource = `on-chain program ${configuredProgramId}`;
+    }
+
     const idlWithAddress = idl as Idl & {
       address?: string;
       metadata?: { address?: string; [key: string]: any };
@@ -648,10 +706,14 @@ class ShadowSwapKeeper {
       address: programId,
     };
 
+    if (idlSource) {
+      console.log(`📦 Loaded ShadowSwap IDL from ${idlSource}.`);
+    }
+
     return new Program(idlWithAddress, this.provider);
   }
 
-  private resolveIdlPath(): string {
+  private resolveIdlPath(): { resolved?: string; checked: string[] } {
     const repoRoot = path.resolve(__dirname, '../../..');
     const candidatePaths = Array.from(
       new Set(
@@ -659,8 +721,23 @@ class ShadowSwapKeeper {
           this.config.idlPath,
           process.env.SHADOW_SWAP_IDL_PATH,
           process.env.IDL_PATH,
-          path.resolve(__dirname, '../../anchor_program/target/idl/shadow_swap.json'),
-          path.join(repoRoot, 'apps/anchor_program/target/idl/shadow_swap.json'),
+          path.resolve(
+            __dirname,
+            '../../anchor_program/target/idl/shadow_swap.json'
+          ),
+          path.join(
+            repoRoot,
+            'apps/anchor_program/target/idl/shadow_swap.json'
+          ),
+          path.join(repoRoot, 'apps/anchor_program/idl/shadow_swap.json'),
+          path.join(
+            repoRoot,
+            'packages/shared_types/dist/shadow_swap.json'
+          ),
+          path.join(
+            repoRoot,
+            'packages/shared_types/src/idl/shadow_swap.json'
+          ),
           path.join(process.cwd(), '../anchor_program/target/idl/shadow_swap.json'),
         ].filter((value): value is string => Boolean(value))
       )
@@ -672,20 +749,16 @@ class ShadowSwapKeeper {
       const resolved = path.isAbsolute(candidate)
         ? candidate
         : path.resolve(candidate);
-      checked.push(resolved);
+      if (!checked.includes(resolved)) {
+        checked.push(resolved);
+      }
 
       if (fs.existsSync(resolved)) {
-        return resolved;
+        return { resolved, checked };
       }
     }
 
-    throw new Error(
-      [
-        'ShadowSwap IDL not found.',
-        'Run "yarn anchor:build" to generate the IDL or set SHADOW_SWAP_IDL_PATH to an existing shadow_swap.json.',
-        `Checked paths: ${checked.join(', ') || 'none'}`,
-      ].join(' ')
-    );
+    return { checked };
   }
 
   private deriveCallbackAuth(): PublicKey {
