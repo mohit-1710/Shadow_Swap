@@ -8,6 +8,39 @@ ShadowSwap is a privacy-preserving orderbook DEX on Solana. Orders are encrypted
 - Single source of truth for account layouts via shared TypeScript definitions.
 - Built-in automation for deploying devnet state, inspecting PDAs, and running the keeper loop.
 
+## System Diagram
+
+```mermaid
+flowchart LR
+  subgraph Client
+    FE[Next.js Frontend]
+  end
+  subgraph "Solana (On-Chain)"
+    AP[Anchor Program]
+    ESC[Escrow Token PDAs]
+  end
+  subgraph Offchain
+    SB[Settlement Bot]
+    MPC[Arcium MPC]
+    SAN[Sanctum / Direct RPC]
+  end
+  subgraph Ops
+    OBS[Monitoring & Logs]
+  end
+
+  FE -->|submit encrypted order| AP
+  FE <-->|state & events| AP
+  FE -->|balance polling| ESC
+
+  SB -->|fetch encrypted orders| AP
+  SB -->|decrypt payloads| MPC
+  SB -->|submit match results| SAN
+  SAN --> AP
+  AP -->|escrow authority| ESC
+  SB -. metrics .-> OBS
+  AP -. program logs .-> OBS
+```
+
 ## Workspace Layout
 
 | Path | Stack | Purpose |
