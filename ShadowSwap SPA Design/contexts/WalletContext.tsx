@@ -55,6 +55,11 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
 
         select(targetWallet.adapter.name)
         await targetWallet.adapter.connect()
+        
+        // Wait a bit to ensure the connected state has been updated
+        // The wallet adapter updates the state asynchronously
+        await new Promise(resolve => setTimeout(resolve, 100))
+        
         return "success"
       }
 
