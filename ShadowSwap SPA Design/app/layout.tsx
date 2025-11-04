@@ -4,6 +4,7 @@ import { Inter, Roboto_Mono, Instrument_Serif } from "next/font/google"
 import { Header } from "@/components/header"
 import { WalletProvider } from "@/contexts/WalletContext"
 import { Toaster } from "@/components/ui/sonner"
+import { Analytics } from "@vercel/analytics/react"
 import "./globals.css"
 
 const geistSans = Inter({ subsets: ["latin"], display: 'swap' })
@@ -34,6 +35,7 @@ export default function RootLayout({
           {children}
           <Toaster />
         </WalletProvider>
+        <Analytics />
       </body>
     </html>
   )
