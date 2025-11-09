@@ -28,6 +28,7 @@ export async function GET(
 
     const docDirectories = [
       path.join(process.cwd(), 'docs'),
+      path.join(process.cwd(), 'public', 'docs'),
       path.join(process.cwd(), '..', 'docs'),
     ];
 

@@ -18,7 +18,7 @@ const nextConfig = {
   // Bundle markdown docs located in the monorepo root so the API route can
   // serve them when deployed to Vercel/Netlify (serverless envs).
   outputFileTracingIncludes: {
-    '/api/docs/[slug]': ['../docs/**/*'],
+    '/api/docs/[slug]': ['./docs/**/*'],
   },
 }
 
