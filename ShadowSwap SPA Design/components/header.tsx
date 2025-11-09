@@ -111,8 +111,6 @@ export function Header() {
 
     if (result === "success") {
       toast.success("Connected successfully", { dismissible: true })
-      // Navigate to trade page after successful connection
-      router.push("/trade")
     } else if (result === "no-wallet") {
       toast.error("No wallet detected. Install a Solana wallet extension to continue.", {
         dismissible: true,
