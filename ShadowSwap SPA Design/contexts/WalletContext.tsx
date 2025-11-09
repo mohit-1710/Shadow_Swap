@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, ReactNode, useMemo } from "react"
+import { createContext, useContext, ReactNode, useMemo, useRef, useEffect, useCallback } from "react"
 import { ConnectionProvider, WalletProvider as SolanaWalletProvider, useWallet as useSolanaWallet } from "@solana/wallet-adapter-react"
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui"
 import { PhantomWalletAdapter, SolflareWalletAdapter } from "@solana/wallet-adapter-wallets"
@@ -29,14 +29,37 @@ const WalletContext = createContext<WalletContextType | undefined>(undefined)
  */
 function WalletContextProvider({ children }: { children: ReactNode }) {
   const wallet = useSolanaWallet()
-  const { connected, publicKey, disconnect, select, wallets } = wallet
+  const walletRef = useRef(wallet)
+  const { connected, publicKey } = wallet
 
-  const connectWallet = async (): Promise<WalletConnectResult> => {
+  useEffect(() => {
+    walletRef.current = wallet
+  }, [wallet])
+
+  const waitForWalletSelection = useCallback(async (targetName: string) => {
+    const timeoutMs = 2000
+    const start = performance.now()
+
+    // Poll until the wallet adapter in context matches the target selection.
+    while (performance.now() - start < timeoutMs) {
+      const current = walletRef.current.wallet
+      if (current && current.adapter.name === targetName) {
+        return
+      }
+      await new Promise((resolve) => requestAnimationFrame(resolve))
+    }
+
+    throw new Error("Timed out waiting for wallet selection")
+  }, [])
+
+  const connectWallet = useCallback(async (): Promise<WalletConnectResult> => {
     try {
+      const { wallets, connected } = walletRef.current
+
       // Identify wallets that are ready for use (extension installed)
       const readyWallets = wallets.filter(({ adapter }) => {
         const state = adapter.readyState
-        return state === WalletReadyState.Installed
+        return state === WalletReadyState.Installed || state === WalletReadyState.Loadable
       })
 
       if (!connected && readyWallets.length === 0) {
@@ -53,6 +76,11 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
           return "no-wallet"
         }
 
+        const targetName = targetWallet.adapter.name
+        walletRef.current.select(targetName)
+
+        await waitForWalletSelection(targetName)
+        await walletRef.current.connect()
         select(targetWallet.adapter.name)
         await targetWallet.adapter.connect()
         
@@ -68,11 +96,11 @@ function WalletContextProvider({ children }: { children: ReactNode }) {
       console.error("Error connecting wallet:", error)
       return "error"
     }
-  }
+  }, [waitForWalletSelection])
 
-  const disconnectWallet = () => {
-    disconnect()
-  }
+  const disconnectWallet = useCallback(() => {
+    void walletRef.current.disconnect()
+  }, [])
 
   return (
     <WalletContext.Provider
