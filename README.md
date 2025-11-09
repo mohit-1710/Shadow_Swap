@@ -2,6 +2,10 @@
 
 ShadowSwap is a privacy-preserving orderbook DEX on Solana. Orders are encrypted in the browser, stored on-chain by an Anchor program, matched off-chain by a keeper, and then settled using stateless instructions. This repository gathers every moving part—program, UI, bot, shared libraries, and tooling—inside a single Yarn workspaces project so contributors can reason about the whole system.
 
+## Demo Video
+
+[Watch the Loom walkthrough](https://www.loom.com/share/34a9da0472f445c4a432f431b3e5e57f) for an overview of the current feature set and developer workflow.
+
 ## Highlights
 
 - Hybrid architecture that protects order flow while keeping settlement on Solana L1.

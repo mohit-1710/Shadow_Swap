@@ -111,6 +111,11 @@ export function Header() {
 
     if (result === "success") {
       toast.success("Connected successfully", { dismissible: true })
+      // Wait a moment for the wallet state to fully propagate before navigating
+      // This ensures isWalletConnected is true on the trade page
+      setTimeout(() => {
+        router.push("/trade")
+      }, 300)
     } else if (result === "no-wallet") {
       toast.error("No wallet detected. Install a Solana wallet extension to continue.", {
         dismissible: true,
