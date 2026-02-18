@@ -148,5 +148,3 @@ pnpm dev
 - `apps/**/README.md` – deep dives on the program, bot, and frontend implementations.
 - `Project_Details/` – architecture notes and glossary material referenced during the hackathon.
 - `scripts/README.md` – reference for operational helpers.
-
-For questions or coordination, open an issue or start a discussion in the repository. Keeping types synchronized (`yarn build:shared`) and documenting Anchor changes in the respective READMEs helps everyone stay aligned.
